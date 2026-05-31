@@ -4,11 +4,6 @@
 
 ChainSave allows users to deposit assets (MockUSDC) into Saving Plans created by the Admin and earn interest (APR). Each deposit is uniquely represented by an **NFT (ERC721)** that acts as an on-chain certificate of deposit.
 
----
-
-## 🎬 Demo
-
-[![Watch the demo](https://img.shields.io/badge/YouTube-Demo-red?logo=youtube)](https://youtu.be/YexGlYJmP-A)
 
 ---
 
