@@ -4,16 +4,13 @@
  * Cách chạy:
  *   npx ts-node scripts/autoRenewBot.ts --network sepolia
  *   npx ts-node scripts/autoRenewBot.ts --network localhost
- *
- * Bot sẽ:
- *   1. Tính thời gian đến 0h00 hôm nay (hoặc ngày mai nếu đã qua 0h)
- *   2. Chờ đến đúng 0h00
- *   3. Quét tất cả deposit đã qua grace period → auto renew
- *   4. Lặp lại lúc 0h00 ngày hôm sau
  */
 
 import "dotenv/config";
-import { ethers, Contract, JsonRpcProvider, Wallet, Interface, Log, TransactionReceipt } from "ethers";
+import {
+  ethers, Contract, JsonRpcProvider, Wallet,
+  Interface, Log, TransactionReceipt,
+} from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -23,9 +20,9 @@ const NETWORK: string = process.argv.includes("--network")
   ? process.argv[process.argv.indexOf("--network") + 1]
   : "sepolia";
 
-let GRACE_PERIOD: number = parseInt(process.env.GRACE_PERIOD_SEC ?? "259200"); // override bởi contract
-const BATCH_HOUR: number   = parseInt(process.env.BATCH_HOUR   ?? "0");        // 0 = 0h00
-const BATCH_MINUTE: number = parseInt(process.env.BATCH_MINUTE ?? "0");        // 0 = :00
+let GRACE_PERIOD: number = parseInt(process.env.GRACE_PERIOD_SEC ?? "259200");
+const BATCH_HOUR: number   = parseInt(process.env.BATCH_HOUR   ?? "0");
+const BATCH_MINUTE: number = parseInt(process.env.BATCH_MINUTE ?? "0");
 
 const RPC_URL: string = NETWORK === "localhost"
   ? "http://127.0.0.1:8545"
@@ -35,13 +32,15 @@ const RPC_URL: string = NETWORK === "localhost"
 
 const CORE_ABI: string[] = [
   "function nextDepositId() view returns (uint256)",
-  "function getDeposit(uint256) view returns (tuple(uint256 planId, uint256 principal, uint256 aprBpsAtOpen, uint256 penaltyBpsAtOpen, uint256 tenorSeconds, uint256 startAt, uint256 maturityAt, uint8 status))",
+
+  
+  "function getDeposit(uint256) view returns (tuple(uint256 planId, uint256 principal, uint256 aprBpsAtOpen, uint256 penaltyBpsAtOpen, uint256 tenorSeconds, uint256 startAt, uint256 maturityAt, uint8 status, address depositor))",
+
   "function autoRenewDeposit(uint256 depositId) returns (uint256)",
   "function gracePeriod() view returns (uint256)",
-  "function setGracePeriod(uint256) external",
-  "event DepositOpened(uint256 indexed depositId, address indexed owner, uint256 indexed planId, uint256 principal, uint256 maturityAt, uint256 aprBpsAtOpen)",
+
+  "event DepositOpened(uint256 indexed depositId, address indexed depositor, uint256 indexed planId, uint256 principal, uint256 maturityAt, uint256 aprBpsAtOpen)",
   "event Renewed(uint256 indexed oldDepositId, uint256 indexed newDepositId, uint256 newPrincipal, uint256 indexed newPlanId)",
-  "function ownerOf(uint256 tokenId) view returns (address)",
 ];
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -55,6 +54,7 @@ interface DepositCert {
   startAt:          bigint;
   maturityAt:       bigint;
   status:           bigint;
+  depositor:        string;   // ← field mới trong v2
 }
 
 interface NextBatch {
@@ -101,42 +101,28 @@ const logOk   = (msg: string): void  => console.log(`[${new Date().toLocaleTimeS
 const logWarn = (msg: string): void  => console.log(`[${new Date().toLocaleTimeString("vi-VN")}] ⚠️  ${msg}`);
 const logErr  = (msg: string): void  => console.log(`[${new Date().toLocaleTimeString("vi-VN")}] ❌ ${msg}`);
 
-// ─── Tính thời gian đến lần chạy tiếp theo ───────────────────────────────────
+// ─── Scheduler helpers ────────────────────────────────────────────────────────
 
 function msUntilNextBatch(): NextBatch {
   const now  = new Date();
   const next = new Date(now);
-
   next.setHours(BATCH_HOUR, BATCH_MINUTE, 0, 0);
-
   if (next <= now) next.setDate(next.getDate() + 1);
-
-  const ms = next.getTime() - now.getTime();
-
+  const ms      = next.getTime() - now.getTime();
   const hours   = Math.floor(ms / 3_600_000);
   const minutes = Math.floor((ms % 3_600_000) / 60_000);
   const seconds = Math.floor((ms % 60_000) / 1_000);
-
-  return {
-    ms,
-    label:   `${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`,
-    nextRun: next,
-  };
+  return { ms, label: `${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`, nextRun: next };
 }
-
-// ─── Load contract address ────────────────────────────────────────────────────
 
 function loadContractAddress(): string {
   const contractsPath = path.join(__dirname, "../frontend/src/contracts.js");
-
   if (fs.existsSync(contractsPath)) {
     const content = fs.readFileSync(contractsPath, "utf8");
     const match   = content.match(/SavingCore:\s*"(0x[a-fA-F0-9]{40})"/);
     if (match) return match[1];
   }
-
   if (process.env.SAVING_CORE_ADDRESS) return process.env.SAVING_CORE_ADDRESS;
-
   throw new Error(
     "Không tìm thấy địa chỉ SavingCore!\n" +
     "Hãy deploy contract trước hoặc set SAVING_CORE_ADDRESS trong .env"
@@ -184,13 +170,19 @@ async function runBatchJob(core: Contract): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   let renewed = 0, failed = 0, skipped = 0;
 
+  // ── Thu thập tất cả depositId từ events ──────────────────────────────────
   const allIds = new Set<string>();
   try {
-    const openEvs = await core.queryFilter(core.filters.DepositOpened(), 0, "latest") as ethers.EventLog[];
+    const openEvs = await core.queryFilter(
+      core.filters.DepositOpened(), 0, "latest"
+    ) as ethers.EventLog[];
     for (const e of openEvs) allIds.add(e.args[0].toString());
 
-    const renewEvs = await core.queryFilter(core.filters.Renewed(), 0, "latest") as ethers.EventLog[];
-    for (const e of renewEvs) allIds.add(e.args[1].toString());
+    // Thêm các deposit được tạo ra từ lần renew trước
+    const renewEvs = await core.queryFilter(
+      core.filters.Renewed(), 0, "latest"
+    ) as ethers.EventLog[];
+    for (const e of renewEvs) allIds.add(e.args[1].toString()); // newDepositId
 
     log(`Tìm thấy ${allIds.size} deposit(s) trong hệ thống`);
   } catch (e: unknown) {
@@ -203,13 +195,13 @@ async function runBatchJob(core: Contract): Promise<void> {
     return;
   }
 
-  const depositIds: bigint[] = [...allIds].map((id) => BigInt(id));
-
+  // ── Phân loại deposit ─────────────────────────────────────────────────────
   const toRenew:  ToRenewItem[] = [];
   const pending:  PendingItem[] = [];
   const inactive: bigint[]      = [];
 
-  for (const depositId of depositIds) {
+  for (const idStr of allIds) {
+    const depositId = BigInt(idStr);
     try {
       const cert = await core.getDeposit(depositId) as DepositCert;
 
@@ -231,20 +223,28 @@ async function runBatchJob(core: Contract): Promise<void> {
   }
 
   console.log("\n📋 Phân loại deposits:");
-  console.log(`   🔄 Cần auto renew : ${toRenew.length}`);
+  console.log(`   🔄 Cần auto renew    : ${toRenew.length}`);
   console.log(`   ⏳ Chưa đủ điều kiện: ${pending.length}`);
-  console.log(`   ✓  Không còn Active : ${inactive.length}`);
+  console.log(`   ✓  Không còn Active  : ${inactive.length}`);
 
   if (pending.length > 0) {
     console.log("\n⏳ Deposit chưa đủ điều kiện:");
     for (const p of pending) {
       const days  = Math.floor(p.remainingSec / 86400);
       const hours = Math.floor((p.remainingSec % 86400) / 3600);
-      console.log(`   #${p.depositId}: còn ${days}d ${hours}h đến hết grace period`);
+      const mins  = Math.floor((p.remainingSec % 3600) / 60);
+      // v2: log depositor thay vì NFT owner — depositor mới là người nhận tiền
+      console.log(
+        `   #${p.depositId}: depositor=${p.cert.depositor.slice(0, 10)}...` +
+        ` còn ${days}d ${hours}h ${mins}m đến hết grace period`
+      );
     }
   }
 
-  if (toRenew.length > 0) {
+  // ── Thực hiện auto renew ──────────────────────────────────────────────────
+  if (toRenew.length === 0) {
+    log("Không có deposit nào cần auto renew trong batch job này.");
+  } else {
     console.log("\n🔄 Bắt đầu auto renew batch...\n");
 
     for (let i = 0; i < toRenew.length; i++) {
@@ -252,9 +252,11 @@ async function runBatchJob(core: Contract): Promise<void> {
       const progress = `[${i + 1}/${toRenew.length}]`;
 
       try {
-        const owner = await core.ownerOf(depositId) as string;
         log(`${progress} Deposit #${depositId}`);
-        log(`         Owner    : ${owner}`);
+
+        // v2: log depositor (người nhận tiền) thay vì ownerOf (NFT owner)
+        // Bot KHÔNG cần biết NFT đang ở đâu — tiền luôn về depositor
+        log(`         Depositor: ${cert.depositor}`);
         log(`         Principal: ${fmt(cert.principal)} USDC`);
         log(`         APR      : ${Number(cert.aprBpsAtOpen) / 100}%`);
         log(`         Matured  : ${fmtDate(cert.maturityAt)}`);
@@ -263,15 +265,23 @@ async function runBatchJob(core: Contract): Promise<void> {
         log(`         Tx hash  : ${tx.hash}`);
         const receipt: TransactionReceipt = await tx.wait();
 
+        // Parse event Renewed để lấy newDepositId và principal mới
         const iface = core.interface as Interface;
         const renewedEvent = receipt.logs
-          .map((l: Log) => { try { return iface.parseLog({ topics: [...l.topics], data: l.data }); } catch { return null; } })
+          .map((l: Log) => {
+            try { return iface.parseLog({ topics: [...l.topics], data: l.data }); }
+            catch { return null; }
+          })
           .find((e) => e?.name === "Renewed");
 
         if (renewedEvent) {
           const newId   = renewedEvent.args[1] as bigint;
           const newCert = await core.getDeposit(newId) as DepositCert;
-          logOk(`${progress} #${depositId} → #${newId} | Principal mới: ${fmt(newCert.principal)} USDC`);
+          logOk(
+            `${progress} #${depositId} → #${newId}` +
+            ` | Principal mới: ${fmt(newCert.principal)} USDC` +
+            ` | Depositor: ${newCert.depositor.slice(0, 10)}...`
+          );
         } else {
           logOk(`${progress} #${depositId} renewed thành công`);
         }
@@ -279,6 +289,7 @@ async function runBatchJob(core: Contract): Promise<void> {
         renewed++;
         stats.totalRenewed++;
 
+        // Delay giữa các tx để tránh nonce collision
         if (i < toRenew.length - 1) {
           await new Promise<void>((r) => setTimeout(r, 2000));
         }
@@ -289,8 +300,6 @@ async function runBatchJob(core: Contract): Promise<void> {
         stats.totalFailed++;
       }
     }
-  } else {
-    log("Không có deposit nào cần auto renew trong batch job này.");
   }
 
   skipped = pending.length;
@@ -313,16 +322,12 @@ async function runBatchJob(core: Contract): Promise<void> {
 
 function scheduleNextBatch(core: Contract): void {
   const { ms, label, nextRun } = msUntilNextBatch();
-
   log(`Batch job tiếp theo lúc: ${nextRun.toLocaleString("vi-VN")} (còn ${label})`);
-
   setTimeout(async () => {
     await runBatchJob(core);
     scheduleNextBatch(core);
   }, ms);
 }
-
-// ─── Countdown ───────────────────────────────────────────────────────────────
 
 function startCountdown(): void {
   setInterval(() => {
@@ -334,13 +339,13 @@ function startCountdown(): void {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log("╔══════════════════════════════════════════════╗");
-  console.log("║   ChainSave — Auto Renew Batch Job (0h00)   ║");
-  console.log("╚══════════════════════════════════════════════╝");
-  console.log(`Network      : ${NETWORK}`);
-  console.log(`RPC URL      : ${RPC_URL}`);
-  console.log(`Batch time   : ${pad(BATCH_HOUR)}:${pad(BATCH_MINUTE)} mỗi ngày`);
-  console.log(`Grace period : sẽ đọc từ contract sau khi kết nối`);
+  console.log("╔══════════════════════════════════════════════════╗");
+  console.log("║  ChainSave v2 — Auto Renew Batch Job (0h00)     ║");
+  console.log("║  Dual-ownership: tiền luôn về depositor gốc     ║");
+  console.log("╚══════════════════════════════════════════════════╝");
+  console.log(`Network    : ${NETWORK}`);
+  console.log(`RPC URL    : ${RPC_URL}`);
+  console.log(`Batch time : ${pad(BATCH_HOUR)}:${pad(BATCH_MINUTE)} mỗi ngày`);
   console.log("");
 
   if (!process.env.PRIVATE_KEY || process.env.PRIVATE_KEY.includes("your_")) {
@@ -360,9 +365,8 @@ async function main(): Promise<void> {
 
     const balance = await provider.getBalance(signer.address);
     log(`ETH balance: ${ethers.formatEther(balance)} ETH`);
-
     if (balance < ethers.parseEther("0.05")) {
-      logWarn("ETH thấp! Nên có ít nhất 0.05 ETH để trả gas cho nhiều tx.");
+      logWarn("ETH thấp! Nên có ít nhất 0.05 ETH để trả gas.");
     }
   } catch (e: unknown) {
     logErr(`Không kết nối được RPC: ${(e as Error).message}`);
@@ -380,6 +384,7 @@ async function main(): Promise<void> {
 
   const core = new Contract(coreAddress!, CORE_ABI, signer);
 
+  // Sanity check contract
   try {
     const count = await core.nextDepositId() as bigint;
     logOk(`Contract OK — hiện có ${count} deposit(s)`);
@@ -389,18 +394,28 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Đọc gracePeriod từ contract
+  // Đọc gracePeriod thực tế từ contract
   try {
     const iface  = new Interface(["function gracePeriod() view returns (uint256)"]);
-    const result = await provider!.call({ to: coreAddress!, data: iface.encodeFunctionData("gracePeriod") });
+    const result = await provider!.call({
+      to:   coreAddress!,
+      data: iface.encodeFunctionData("gracePeriod"),
+    });
     GRACE_PERIOD = Number(iface.decodeFunctionResult("gracePeriod", result)[0]);
-    logOk(`Grace Period : ${GRACE_PERIOD}s (${(GRACE_PERIOD / 3600).toFixed(1)} giờ / ${(GRACE_PERIOD / 86400).toFixed(2)} ngày)`);
+    logOk(
+      `Grace Period: ${GRACE_PERIOD}s` +
+      ` (${(GRACE_PERIOD / 3600).toFixed(1)} giờ` +
+      ` / ${(GRACE_PERIOD / 86400).toFixed(2)} ngày)`
+    );
   } catch {
-    const envGrace = parseInt(process.env.GRACE_PERIOD_SEC ?? "259200");
-    GRACE_PERIOD = envGrace;
-    logWarn(`gracePeriod không có trong contract — dùng GRACE_PERIOD_SEC=${GRACE_PERIOD}s từ .env`);
+    GRACE_PERIOD = parseInt(process.env.GRACE_PERIOD_SEC ?? "259200");
+    logWarn(`gracePeriod không đọc được từ contract — dùng GRACE_PERIOD_SEC=${GRACE_PERIOD}s từ .env`);
   }
 
+  // Nhắc nhở về dual-ownership
+  console.log("");
+  log("ℹ️  Dual-ownership mode: autoRenewDeposit mint NFT về depositor gốc,");
+  log("   không phải về ví bot. Bot chỉ trả gas, không nhận gì cả.");
   console.log("");
 
   log("Chạy batch job khởi động (xử lý deposit tồn đọng nếu có)...");
