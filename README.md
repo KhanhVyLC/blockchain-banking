@@ -11,7 +11,7 @@ ChainSave allows users to deposit assets (MockUSDC) into Saving Plans created by
 
 | Feature | Description |
 |---|---|
-| **Dual Ownership Security** | **Innovative V2 Feature:** The system separates *Utility Rights* (NFT) from *Asset Rights* (Depositor wallet). Even if your wallet is compromised and the NFT is stolen, the hacker cannot withdraw your funds. Only the original depositor address can claim the principal and interest. |
+| **Dual Ownership Security** | The system separates *Utility Rights* (NFT) from *Asset Rights* (Depositor wallet). Even if your wallet is compromised and the NFT is stolen, the hacker cannot withdraw your funds. Only the original depositor address can claim the principal and interest. |
 | **Open Deposit & Snapshot** | Users select an active saving plan, lock USDC, and receive a transferable ERC721 NFT certificate. The APR and Penalty rates are **snapshotted (immutable)** at the moment of deposit, protecting users from future admin rate changes. |
 | **NFT Composability** | The ERC721 certificate can be freely transferred, traded on secondary markets, or used as collateral in other DeFi protocols, all without compromising the core deposit's security. |
 | **Withdraw at Maturity** | Withdraw the exact principal plus accumulated simple interest. The interest is dynamically calculated using precision math (Basis Points) to avoid EVM rounding errors. |
