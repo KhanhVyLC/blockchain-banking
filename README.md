@@ -76,7 +76,7 @@ chainsave/
 │   └── deploy.ts
 ├── scripts/                # Supporting scripts
 │   └── autoRenewBot.ts     # Bot for scanning and auto-renewing deposits
-├── test/                   # Smart contract unit tests (>90% coverage)
+├── test/                   # Smart contract unit tests
 │   └── SavingCore.test.ts
 ├── typechain-types/        # Type definitions auto-generated on compile
 ├── frontend/               # ReactJS web application (Vite)
