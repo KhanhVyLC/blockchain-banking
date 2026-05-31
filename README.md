@@ -44,9 +44,10 @@ The system is composed of **4 core components** working closely together:
 | Contract | Role |
 |---|---|
 | `MockUSDC.sol` | ERC20 token simulating USDC (6 decimals) for testing, with mint functionality for Admin. |
+|'SavingCert.sol' | This is an NFT (ERC-721) contract responsible for minting unique deposit certificates, serving as proof of transaction issued to users whenever they open a savings account. |
 | `VaultManager.sol` | Interest pool treasury — manages the fee receiver address, authorizes interest payouts, and controls the Pause state. |
 | `SavingCore.sol` | The heart of the project — manages saving plans, issues NFT certificates (ERC721), and handles all interest/penalty calculation logic. |
-|SavingCert.sol | This is an NFT (ERC-721) contract responsible for minting unique deposit certificates, serving as proof of transaction issued to users whenever they open a savings account. |
+
 
 ### 2. 🖥️ Frontend (React + Vite + ethers.js v6)
 
