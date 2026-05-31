@@ -7,7 +7,17 @@ import { ADDRESSES, ERC20_ABI, CORE_ABI } from "./contracts.js";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const fmt      = (n)   => (Number(n) / 1e6).toFixed(2);
 const fmtApr   = (bps) => (Number(bps) / 100).toFixed(2) + "%";
-const fmtDate  = (ts)  => new Date(Number(ts) * 1000).toLocaleDateString("vi-VN");
+
+// fmtDate: hiển thị đầy đủ ngày + giờ:phút:giây
+const fmtDate  = (ts)  => {
+  const d = new Date(Number(ts) * 1000);
+  const date = d.toLocaleDateString("vi-VN");
+  const hh   = String(d.getHours()).padStart(2, "0");
+  const mm   = String(d.getMinutes()).padStart(2, "0");
+  const ss   = String(d.getSeconds()).padStart(2, "0");
+  return `${date} ${hh}:${mm}:${ss}`;
+};
+
 const fmtTenor = (sec) => {
   const s = Number(sec);
   if (s < 3600)        return `${Math.round(s / 60)} phút`;
@@ -15,10 +25,15 @@ const fmtTenor = (sec) => {
   if (s % 86400 === 0) return `${s / 86400} ngày`;
   return `${(s / 86400).toFixed(1)} ngày`;
 };
+const fmtAddr  = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : "—";
 
 const STATUS       = ["Active", "Withdrawn", "Manual Renewed", "Auto Renewed"];
-const STATUS_COLOR = ["#22c55e", "#94a3b8", "#a78bfa", "#60a5fa"];
-const CARD_COLOR   = "#0ea5e9";
+const STATUS_COLOR = ["#16a34a", "#64748b", "#7c3aed", "#2563eb"];
+
+// CARD_COLOR cho admin → xanh teal theo màu brand
+const CARD_COLOR     = "#006c6c";   // nền card admin (teal)
+const CARD_ACCENT    = "#007f7f";   // accent teal nhạt hơn
+const CARD_HOVER_BG  = "#005858";   // hover nền card admin (teal đậm)
 
 const VAULT_ABI = [
   "function vaultBalance() view returns (uint256)",
@@ -48,29 +63,30 @@ const ADMIN_ABI = [
   "function integrityCheck() view returns (bool,uint256,uint256,uint256)",
 ];
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles ──────────────────────────────────────────────────────────────────
+// [CHANGED] Toàn bộ palette chuyển sang light/white theme
 const S = {
-  page:    { minHeight: "100vh", background: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter',system-ui,sans-serif" },
-  header:  { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 32px", borderBottom: "1px solid #1e293b", background: "#0f172a", position: "sticky", top: 0, zIndex: 100 },
+  page:    { minHeight: "100vh", background: "#f2f2f2", color: "#0f172a", fontFamily: "'Inter',system-ui,sans-serif" },
+  header:  { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 32px", borderBottom: "1px solid #e0e0e0", background: "#ffffff", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 4px #0f172a0d" },
   main:    { maxWidth: 1100, margin: "0 auto", padding: "32px 24px" },
   hero:    { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "120px 32px", gap: 24 },
   tabs:    { display: "flex", gap: 4, marginBottom: 24, flexWrap: "wrap" },
-  tab:     { padding: "10px 20px", borderRadius: 8, border: "1px solid transparent", cursor: "pointer", background: "#1e293b", color: "#94a3b8", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 7 },
-  tabOn:   { background: "#6366f1", color: "#fff", border: "1px solid #6366f1" },
-  tabAdm:  { border: "1px solid #f59e0b" },
-  card:    { background: "#1e293b", borderRadius: 16, padding: 24, border: "1px solid #334155" },
+  tab:     { padding: "10px 20px", borderRadius: 8, border: "1px solid #e2e8f0", cursor: "pointer", background: "#f1f5f9", color: "#64748b", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 7 },
+  tabOn:   { background: "#006c6c", color: "#fff", border: "1px solid #006c6c" },
+  tabAdm:  { border: "1px solid #006c6c" },
+  card:    { background: "#ffffff", borderRadius: 16, padding: 24, border: "1px solid #e2e8f0", boxShadow: "0 1px 6px #0f172a0a" },
   grid:    { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 20 },
   igrid:   { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 20px", marginTop: 12 },
-  btnP:    { background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer", fontSize: 14 },
-  btnS:    { background: "#334155", color: "#e2e8f0", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer", fontSize: 14 },
+  btnP:    { background: "#006c6c", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer", fontSize: 14 },
+  btnS:    { background: "#f1f5f9", color: "#334155", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer", fontSize: 14 },
   btnA:    { background: "#0891b2", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer", fontSize: 14 },
-  btnD:    { background: "#991b1b", color: "#fca5a5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer", fontSize: 14 },
-  chip:    { background: "#1e293b", border: "1px solid #334155", padding: "6px 12px", borderRadius: 20, fontSize: 12, color: "#94a3b8", fontFamily: "monospace" },
-  overlay: { position: "fixed", inset: 0, background: "#00000088", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 },
-  modal:   { background: "#1e293b", borderRadius: 16, padding: 28, minWidth: 340, maxWidth: 480, width: "90%", border: "1px solid #334155" },
-  input:   { width: "100%", background: "#0f172a", border: "1px solid #334155", borderRadius: 8, padding: "10px 12px", color: "#e2e8f0", fontSize: 14, boxSizing: "border-box", marginTop: 4 },
-  label:   { fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 },
-  toast:   { position: "fixed", top: 20, right: 20, zIndex: 999, padding: "12px 20px", borderRadius: 10, color: "#fff", fontWeight: 600, fontSize: 14, boxShadow: "0 4px 20px #0008", maxWidth: 360 },
+  btnD:    { background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer", fontSize: 14 },
+  chip:    { background: "#f1f5f9", border: "1px solid #e2e8f0", padding: "6px 12px", borderRadius: 20, fontSize: 12, color: "#475569", fontFamily: "monospace" },
+  overlay: { position: "fixed", inset: 0, background: "#0f172a88", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 },
+  modal:   { background: "#ffffff", borderRadius: 16, padding: 28, minWidth: 340, maxWidth: 480, width: "90%", border: "1px solid #e2e8f0", boxShadow: "0 8px 32px #0f172a22" },
+  input:   { width: "100%", background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: 8, padding: "10px 12px", color: "#0f172a", fontSize: 14, boxSizing: "border-box", marginTop: 4 },
+  label:   { fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1 },
+  toast:   { position: "fixed", top: 20, right: 20, zIndex: 999, padding: "12px 20px", borderRadius: 10, color: "#fff", fontWeight: 600, fontSize: 14, boxShadow: "0 4px 20px #0f172a22", maxWidth: 360 },
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -80,8 +96,8 @@ const S = {
 function InfoItem({ label, value }) {
   return (
     <div>
-      <div style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
-      <div style={{ fontWeight: 600, fontSize: 14 }}>{value}</div>
+      <div style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+      <div style={{ fontWeight: 600, fontSize: 14, color: "#0f172a" }}>{value}</div>
     </div>
   );
 }
@@ -99,6 +115,7 @@ function AField({ label, value, onChange, placeholder, type = "text", width = "1
   );
 }
 
+// [CHANGED] AdminCard → nền xanh lá đậm
 function AdminCard({ img, label, color, onClick }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -107,14 +124,14 @@ function AdminCard({ img, label, color, onClick }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: hovered ? color + "22" : "#1e293b",
-        border: `2px solid ${color}`,
+        background: hovered ? CARD_HOVER_BG : CARD_COLOR,
+        border: `2px solid ${hovered ? "#00a0a0" : "#006c6c"}`,
         borderRadius: 16, padding: "28px 16px",
         display: "flex", flexDirection: "column",
         alignItems: "center", gap: 14,
         cursor: "pointer", transition: "all 0.2s",
         transform: hovered ? "translateY(-4px)" : "none",
-        boxShadow: hovered ? `0 8px 24px ${color}55` : "none",
+        boxShadow: hovered ? "0 8px 24px #006c6c66" : "0 2px 8px #006c6c22",
       }}
     >
       {img && (
@@ -123,7 +140,7 @@ function AdminCard({ img, label, color, onClick }) {
           onError={e => { e.target.style.display = "none"; }}
         />
       )}
-      <span style={{ fontWeight: 700, fontSize: 14, color: hovered ? "#fff" : "#e2e8f0", textAlign: "center", lineHeight: 1.4 }}>
+      <span style={{ fontWeight: 700, fontSize: 14, color: "#dcfce7", textAlign: "center", lineHeight: 1.4 }}>
         {label}
       </span>
     </div>
@@ -151,34 +168,34 @@ function VaultSolvency({ core, vaultBal }) {
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
         {[
-          { label: "Tiền gốc khoá", value: fmt(summary.principalLocked) + " USDC", color: "#60a5fa" },
-          { label: "Lãi phải trả",  value: fmt(summary.interestOwed) + " USDC",    color: "#f59e0b" },
-          { label: "Vault hiện có", value: fmt(summary.vaultBalance) + " USDC",    color: summary.isSolvent ? "#22c55e" : "#ef4444" },
+          { label: "Tiền gốc khoá", value: fmt(summary.principalLocked) + " USDC", color: "#2563eb" },
+          { label: "Lãi phải trả",  value: fmt(summary.interestOwed) + " USDC",    color: "#d97706" },
+          { label: "Vault hiện có", value: fmt(summary.vaultBalance) + " USDC",    color: summary.isSolvent ? "#16a34a" : "#dc2626" },
         ].map(s => (
-          <div key={s.label} style={{ background: "#0f172a", borderRadius: 10, padding: "12px 14px", textAlign: "center" }}>
-            <div style={{ color: "#64748b", fontSize: 11, marginBottom: 4 }}>{s.label}</div>
+          <div key={s.label} style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 14px", textAlign: "center", border: "1px solid #e2e8f0" }}>
+            <div style={{ color: "#94a3b8", fontSize: 11, marginBottom: 4 }}>{s.label}</div>
             <div style={{ color: s.color, fontWeight: 700, fontSize: 15 }}>{s.value}</div>
           </div>
         ))}
       </div>
       <div style={{
-        background: summary.isSolvent ? "#052e16" : "#450a0a",
-        border: `1px solid ${summary.isSolvent ? "#166534" : "#991b1b"}`,
+        background: summary.isSolvent ? "#f0fdf4" : "#fef2f2",
+        border: `1px solid ${summary.isSolvent ? "#86efac" : "#fca5a5"}`,
         borderRadius: 10, padding: "12px 16px",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ color: summary.isSolvent ? "#86efac" : "#fca5a5", fontWeight: 700 }}>
-            {summary.isSolvent ? "✅ Vault đủ khả năng chi trả" : "⚠️ VAULT THIẾU TIỀN LÃI"}
+          <span style={{ color: summary.isSolvent ? "#15803d" : "#dc2626", fontWeight: 700 }}>
+            {summary.isSolvent ? " Vault đủ khả năng chi trả" : "⚠️ VAULT THIẾU TIỀN LÃI"}
           </span>
-          <span style={{ color: "#94a3b8", fontSize: 13 }}>{Math.min(pct, 100)}% coverage</span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>{Math.min(pct, 100)}% coverage</span>
         </div>
         {!summary.isSolvent && (
-          <div style={{ color: "#fca5a5", fontSize: 13, marginTop: 6 }}>
+          <div style={{ color: "#dc2626", fontSize: 13, marginTop: 6 }}>
             Thiếu {fmt(summary.shortfall)} USDC — cần nạp thêm vào vault
           </div>
         )}
-        <div style={{ marginTop: 8, background: "#ffffff15", borderRadius: 6, height: 6, overflow: "hidden" }}>
-          <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: summary.isSolvent ? "#22c55e" : "#ef4444", transition: "width 0.5s" }} />
+        <div style={{ marginTop: 8, background: "#e2e8f0", borderRadius: 6, height: 6, overflow: "hidden" }}>
+          <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: summary.isSolvent ? "#16a34a" : "#dc2626", transition: "width 0.5s" }} />
         </div>
       </div>
     </div>
@@ -212,9 +229,9 @@ function GracePeriodConfig({ core, loading, withLoading }) {
 
   return (
     <div>
-      <div style={{ ...S.card, padding: "14px 18px", marginBottom: 20, background: "#0f172a" }}>
+      <div style={{ ...S.card, padding: "14px 18px", marginBottom: 20, background: "#f0fdf4", border: "1px solid #86efac" }}>
         <div style={{ color: "#64748b", fontSize: 12, marginBottom: 4 }}>Grace Period hiện tại</div>
-        <div style={{ color: CARD_COLOR, fontWeight: 700, fontSize: 18 }}>{fmtGrace(current)}</div>
+        <div style={{ color: "#006c6c", fontWeight: 700, fontSize: 18 }}>{fmtGrace(current)}</div>
         <div style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>
           Sau khi đáo hạn, user có thời gian này để tự rút hoặc gia hạn thủ công.<br />
           Hết thời gian → bot tự động gia hạn với APR cũ.
@@ -273,27 +290,27 @@ function SecurityMonitor({ core, vaultBal, withLoading, loading }) {
           {loading2 ? "Đang kiểm tra..." : "🔄 Refresh"}
         </button>
       </div>
-      <p style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 8px" }}>
+      <p style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 8px" }}>
         Kiểm tra tính toàn vẹn (Integrity Check)
       </p>
       {integrity ? (
         <div style={{
-          background: integrity.isIntact ? "#052e16" : "#450a0a",
-          border: `1px solid ${integrity.isIntact ? "#166534" : "#991b1b"}`,
+          background: integrity.isIntact ? "#f0fdf4" : "#fef2f2",
+          border: `1px solid ${integrity.isIntact ? "#86efac" : "#fca5a5"}`,
           borderRadius: 10, padding: "14px 16px", marginBottom: 20,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
               width: 12, height: 12, borderRadius: "50%",
-              background: integrity.isIntact ? "#22c55e" : "#ef4444",
-              boxShadow: `0 0 8px ${integrity.isIntact ? "#22c55e" : "#ef4444"}`,
+              background: integrity.isIntact ? "#16a34a" : "#dc2626",
+              boxShadow: `0 0 8px ${integrity.isIntact ? "#16a34a" : "#dc2626"}`,
             }} />
-            <span style={{ fontWeight: 700, color: integrity.isIntact ? "#86efac" : "#fca5a5" }}>
+            <span style={{ fontWeight: 700, color: integrity.isIntact ? "#15803d" : "#dc2626" }}>
               {integrity.isIntact ? "✅ Số dư khớp — không phát hiện bất thường" : "🚨 CẢNH BÁO: Số dư KHÔNG khớp!"}
             </span>
           </div>
           {!integrity.isIntact && (
-            <div style={{ color: "#fca5a5", fontSize: 13, marginTop: 6 }}>
+            <div style={{ color: "#dc2626", fontSize: 13, marginTop: 6 }}>
               Sổ sách: {fmt(integrity.expected)} USDC · Thực tế: {fmt(integrity.actual)} USDC · Thiếu: {fmt(integrity.diff)} USDC
             </div>
           )}
@@ -304,7 +321,7 @@ function SecurityMonitor({ core, vaultBal, withLoading, loading }) {
           )}
         </div>
       ) : <div style={{ color: "#64748b", fontSize: 13, marginBottom: 20 }}>Đang tải...</div>}
-      <p style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 8px" }}>
+      <p style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 8px" }}>
         Vault Solvency
       </p>
       <VaultSolvency core={core} vaultBal={vaultBal} />
@@ -340,11 +357,10 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
     </button>
   );
 
-  // ── Create Plan ────────────────────────────────────────────────────────────
   if (panelKey === "createPlan") return (
     <div>
       <Back />
-      <h3 style={{ color: "#6366f1", marginTop: 0 }}>📋 Tạo Saving Plan mới</h3>
+      <h3 style={{ color: "#006c6c", marginTop: 0 }}> Tạo Saving Plan mới</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 420 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label style={S.label}>Kỳ hạn</label>
@@ -369,10 +385,10 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
           onClick={() => withLoading("Tạo Plan", async () => {
             const u = v => v && v !== "0" ? ethers.parseUnits(v, 6) : 0n;
             const tenorSec = newPlan.tenorUnit === "seconds"
-            ? BigInt(Math.round(parseFloat(newPlan.tenorVal)))
-            : newPlan.tenorUnit === "hours"
-              ? BigInt(Math.round(parseFloat(newPlan.tenorVal) * 3600))
-              : BigInt(Math.round(parseFloat(newPlan.tenorVal) * 86400));
+              ? BigInt(Math.round(parseFloat(newPlan.tenorVal)))
+              : newPlan.tenorUnit === "hours"
+                ? BigInt(Math.round(parseFloat(newPlan.tenorVal) * 3600))
+                : BigInt(Math.round(parseFloat(newPlan.tenorVal) * 86400));
             await (await core.createPlan(tenorSec, BigInt(newPlan.aprBps),
               u(newPlan.minDeposit), u(newPlan.maxDeposit), BigInt(newPlan.penaltyBps))).wait();
             setNewPlan({ tenorVal: "", tenorUnit: "days", aprBps: "", minDeposit: "", maxDeposit: "", penaltyBps: "" });
@@ -383,12 +399,11 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
     </div>
   );
 
-  // ── Update APR ─────────────────────────────────────────────────────────────
   if (panelKey === "updatePlan") return (
     <div>
       <Back />
-      <h3 style={{ color: "#f59e0b", marginTop: 0 }}>✏️ Cập nhật APR</h3>
-      <p style={{ color: "#94a3b8", fontSize: 13 }}>⚠️ Chỉ ảnh hưởng deposit <strong>mới</strong> — deposit đang mở không thay đổi.</p>
+      <h3 style={{ color: "#d97706", marginTop: 0 }}> Cập nhật APR</h3>
+      <p style={{ color: "#64748b", fontSize: 13 }}>⚠️ Chỉ ảnh hưởng deposit <strong>mới</strong> — deposit đang mở không thay đổi.</p>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 340 }}>
         <AField label="Plan ID"       value={updForm.planId}    onChange={v => setUpdForm(f => ({ ...f, planId: v }))}    placeholder="0"   type="number" />
         <AField label="APR mới (bps)" value={updForm.newAprBps} onChange={v => setUpdForm(f => ({ ...f, newAprBps: v }))} placeholder="300" type="number" />
@@ -402,18 +417,17 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
     </div>
   );
 
-  // ── Toggle Plan ────────────────────────────────────────────────────────────
   if (panelKey === "togglePlan") return (
     <div>
       <Back />
-      <h3 style={{ color: "#0891b2", marginTop: 0 }}>🔁 Bật / Tắt Plan</h3>
+      <h3 style={{ color: "#0891b2", marginTop: 0 }}> Bật / Tắt Plan</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 340 }}>
         <AField label="Plan ID" value={togForm.planId} onChange={v => setTogForm(f => ({ ...f, planId: v }))} placeholder="0" type="number" />
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label style={S.label}>Hành động</label>
           <select style={{ ...S.input, marginTop: 0 }} value={togForm.action} onChange={e => setTogForm(f => ({ ...f, action: e.target.value }))}>
-            <option value="enable">✅ Enable</option>
-            <option value="disable">❌ Disable</option>
+            <option value="enable"> Enable</option>
+            <option value="disable"> Disable</option>
           </select>
         </div>
         <button style={S.btnA} disabled={!!loading}
@@ -427,22 +441,21 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
         </button>
       </div>
       <div style={{ marginTop: 24 }}>
-        <p style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Danh sách plans</p>
+        <p style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Danh sách plans</p>
         {plans.map(p => (
-          <div key={String(p.id)} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#0f172a", borderRadius: 8, marginBottom: 6, fontSize: 13 }}>
+          <div key={String(p.id)} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#f8fafc", borderRadius: 8, marginBottom: 6, fontSize: 13, border: "1px solid #e2e8f0" }}>
             <span>Plan #{String(p.id)} — {fmtTenor(p.tenorSeconds)} · {fmtApr(p.aprBps)}</span>
-            <span style={{ color: p.enabled ? "#22c55e" : "#ef4444", fontWeight: 700 }}>{p.enabled ? "✅ ON" : "❌ OFF"}</span>
+            <span style={{ color: p.enabled ? "#16a34a" : "#dc2626", fontWeight: 700 }}>{p.enabled ? " ON" : " OFF"}</span>
           </div>
         ))}
       </div>
     </div>
   );
 
-  // ── Vault ──────────────────────────────────────────────────────────────────
   if (panelKey === "vault") return (
     <div>
       <Back />
-      <h3 style={{ color: "#22c55e", marginTop: 0 }}>🏦 Quản lý Vault & Đối soát</h3>
+      <h3 style={{ color: "#16a34a", marginTop: 0 }}> Quản lý Vault & Đối soát</h3>
       <VaultSolvency core={core} vaultBal={vaultBal} />
       <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 340 }}>
         <AField label="Nạp vào vault (USDC)" value={fundAmt} onChange={setFundAmt} placeholder="10000" type="number" />
@@ -453,9 +466,9 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
             await (await vault.fundVault(amt)).wait();
             setFundAmt("");
           })}>
-          {loading === "Nạp Vault" ? "..." : "💰 Nạp vào Vault"}
+          {loading === "Nạp Vault" ? "..." : " Nạp vào Vault"}
         </button>
-        <div style={{ borderTop: "1px solid #334155", paddingTop: 14 }}>
+        <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 14 }}>
           <AField label="Rút từ vault (USDC)" value={wdAmt} onChange={setWdAmt} placeholder="1000" type="number" />
         </div>
         <button style={S.btnD} disabled={!!loading}
@@ -463,20 +476,19 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
             await (await vault.withdrawVault(ethers.parseUnits(wdAmt, 6))).wait();
             setWdAmt("");
           })}>
-          {loading === "Rút Vault" ? "..." : "📤 Rút từ Vault"}
+          {loading === "Rút Vault" ? "..." : " Rút từ Vault"}
         </button>
       </div>
     </div>
   );
 
-  // ── Fee Receiver ───────────────────────────────────────────────────────────
   if (panelKey === "feeReceiver") return (
     <div>
       <Back />
-      <h3 style={{ color: "#a78bfa", marginTop: 0 }}>💸 Fee Receiver</h3>
-      <div style={{ ...S.card, padding: 14, marginBottom: 20, background: "#0f172a" }}>
+      <h3 style={{ color: "#7c3aed", marginTop: 0 }}>💸 Fee Receiver</h3>
+      <div style={{ ...S.card, padding: 14, marginBottom: 20, background: "#f8fafc" }}>
         <div style={{ color: "#64748b", fontSize: 12, marginBottom: 4 }}>Địa chỉ hiện tại</div>
-        <code style={{ color: "#e2e8f0", fontSize: 12, wordBreak: "break-all" }}>{feeRcv}</code>
+        <code style={{ color: "#0f172a", fontSize: 12, wordBreak: "break-all" }}>{feeRcv}</code>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 420 }}>
         <AField label="Địa chỉ mới" value={newFee} onChange={setNewFee} placeholder="0x..." />
@@ -491,22 +503,21 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
     </div>
   );
 
-  // ── Pause ──────────────────────────────────────────────────────────────────
   if (panelKey === "pause") return (
     <div>
       <Back />
-      <h3 style={{ color: "#ef4444", marginTop: 0 }}>🚨 Khẩn cấp — Pause / Unpause</h3>
-      <div style={{ ...S.card, padding: 20, marginBottom: 20, borderLeft: "4px solid #ef4444" }}>
-        <div style={{ color: "#94a3b8", fontSize: 13, marginBottom: 12 }}>
+      <h3 style={{ color: "#dc2626", marginTop: 0 }}> Khẩn cấp — Pause / Unpause</h3>
+      <div style={{ ...S.card, padding: 20, marginBottom: 20, borderLeft: "4px solid #dc2626", background: "#fef2f2" }}>
+        <div style={{ color: "#64748b", fontSize: 13, marginBottom: 12 }}>
           Khi pause: tất cả <strong>deposit, withdraw, renew</strong> đều bị chặn.
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{
             width: 12, height: 12, borderRadius: "50%",
-            background: isPaused ? "#ef4444" : "#22c55e",
-            boxShadow: `0 0 8px ${isPaused ? "#ef4444" : "#22c55e"}`,
+            background: isPaused ? "#dc2626" : "#16a34a",
+            boxShadow: `0 0 8px ${isPaused ? "#dc2626" : "#16a34a"}`,
           }} />
-          <span style={{ fontWeight: 700, fontSize: 16, color: isPaused ? "#ef4444" : "#22c55e" }}>
+          <span style={{ fontWeight: 700, fontSize: 16, color: isPaused ? "#dc2626" : "#16a34a" }}>
             {isPaused ? "HỆ THỐNG ĐANG TẠM DỪNG" : "HỆ THỐNG ĐANG HOẠT ĐỘNG"}
           </span>
         </div>
@@ -530,24 +541,22 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
     </div>
   );
 
-  // ── Grace Period ───────────────────────────────────────────────────────────
   if (panelKey === "graceperiod") return (
     <div>
       <Back />
-      <h3 style={{ color: CARD_COLOR, marginTop: 0 }}>⏱ Cập nhật Grace Period</h3>
-      <p style={{ color: "#94a3b8", fontSize: 13, margin: "0 0 20px" }}>
+      <h3 style={{ color: "#006c6c", marginTop: 0 }}>⏱ Cập nhật Grace Period</h3>
+      <p style={{ color: "#64748b", fontSize: 13, margin: "0 0 20px" }}>
         Sau khi deposit đáo hạn, user có đúng thời gian này để tự rút hoặc gia hạn thủ công.
-        Hết thời gian → bot tự động gia hạn với <strong style={{ color: "#e2e8f0" }}>APR cũ</strong>.
+        Hết thời gian → bot tự động gia hạn với <strong style={{ color: "#0f172a" }}>APR cũ</strong>.
       </p>
       <GracePeriodConfig core={core} loading={loading} withLoading={withLoading} />
     </div>
   );
 
-  // ── Mint USDC ──────────────────────────────────────────────────────────────
   if (panelKey === "mint") return (
     <div>
       <Back />
-      <h3 style={{ color: "#64748b", marginTop: 0 }}>🪙 Phát USDC cho Depositor</h3>
+      <h3 style={{ color: "#475569", marginTop: 0 }}> Phát USDC cho Depositor</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 420 }}>
         <AField label="Địa chỉ ví nhận" value={mintTo}  onChange={setMintTo}  placeholder="0x..." />
         <AField label="Số lượng (USDC)"  value={mintAmt} onChange={setMintAmt} placeholder="10000" type="number" />
@@ -562,7 +571,7 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
             setMintHist(h => [{ addr: mintTo, amt: mintAmt, time: new Date().toLocaleTimeString("vi-VN") }, ...h.slice(0, 4)]);
             setMintTo("");
           })}>
-          {loading === "Mint" ? "Đang mint..." : "🪙 Mint USDC"}
+          {loading === "Mint" ? "Đang mint..." : " Mint USDC"}
         </button>
         <button style={S.btnS} disabled={!!loading}
           onClick={() => withLoading("Mint Self", async () => {
@@ -572,14 +581,14 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
               data: iface.encodeFunctionData("mint", [account, ethers.parseUnits("10000", 6)]),
             })).wait();
           })}>
-          {loading === "Mint Self" ? "..." : "🪙 Mint 10,000 cho tôi"}
+          {loading === "Mint Self" ? "..." : " Mint 10,000 cho tôi"}
         </button>
         {mintHist.length > 0 && (
-          <div style={{ background: "#0f172a", borderRadius: 8, padding: "10px 14px" }}>
-            <p style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", margin: "0 0 8px" }}>Lịch sử mint</p>
+          <div style={{ background: "#f8fafc", borderRadius: 8, padding: "10px 14px", border: "1px solid #e2e8f0" }}>
+            <p style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", margin: "0 0 8px" }}>Lịch sử mint</p>
             {mintHist.map((h, i) => (
-              <div key={i} style={{ fontSize: 12, color: "#94a3b8", padding: "4px 0", borderBottom: i < mintHist.length - 1 ? "1px solid #1e293b" : "none" }}>
-                <span style={{ color: "#22c55e" }}>✓</span> <span style={{ color: "#e2e8f0" }}>{h.amt} USDC</span> → {h.addr.slice(0, 10)}...{h.addr.slice(-6)} <span style={{ color: "#475569" }}>({h.time})</span>
+              <div key={i} style={{ fontSize: 12, color: "#64748b", padding: "4px 0", borderBottom: i < mintHist.length - 1 ? "1px solid #e2e8f0" : "none" }}>
+                <span style={{ color: "#16a34a" }}>✓</span> <span style={{ color: "#0f172a" }}>{h.amt} USDC</span> → {h.addr.slice(0, 10)}...{h.addr.slice(-6)} <span style={{ color: "#94a3b8" }}>({h.time})</span>
               </div>
             ))}
           </div>
@@ -588,32 +597,31 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
     </div>
   );
 
-  // ── View Plans ─────────────────────────────────────────────────────────────
   if (panelKey === "plans") return (
     <div>
       <Back />
-      <h3 style={{ color: "#0891b2", marginTop: 0 }}>📊 Danh sách Plans</h3>
+      <h3 style={{ color: "#0891b2", marginTop: 0 }}> Danh sách Plans</h3>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
-            <tr style={{ color: "#64748b" }}>
+            <tr style={{ color: "#94a3b8", background: "#f8fafc" }}>
               {["ID", "Tenor", "APR", "Min", "Max", "Penalty", "Trạng thái"].map(h => (
-                <th key={h} style={{ padding: "8px 12px", borderBottom: "1px solid #334155", textAlign: "left" }}>{h}</th>
+                <th key={h} style={{ padding: "8px 12px", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {plans.map(p => (
-              <tr key={String(p.id)} style={{ borderBottom: "1px solid #1e293b" }}>
+              <tr key={String(p.id)} style={{ borderBottom: "1px solid #f1f5f9" }}>
                 <td style={{ padding: "10px 12px" }}>#{String(p.id)}</td>
                 <td style={{ padding: "10px 12px" }}>{fmtTenor(p.tenorSeconds)}</td>
-                <td style={{ padding: "10px 12px", color: "#6366f1", fontWeight: 700 }}>{fmtApr(p.aprBps)}</td>
+                <td style={{ padding: "10px 12px", color: "#006c6c", fontWeight: 700 }}>{fmtApr(p.aprBps)}</td>
                 <td style={{ padding: "10px 12px" }}>{p.minDeposit > 0n ? fmt(p.minDeposit) + " USDC" : "—"}</td>
                 <td style={{ padding: "10px 12px" }}>{p.maxDeposit > 0n ? fmt(p.maxDeposit) + " USDC" : "—"}</td>
                 <td style={{ padding: "10px 12px" }}>{fmtApr(p.earlyWithdrawPenaltyBps)}</td>
                 <td style={{ padding: "10px 12px" }}>
-                  <span style={{ color: p.enabled ? "#22c55e" : "#ef4444", fontWeight: 600 }}>
-                    {p.enabled ? "✅ Enabled" : "❌ Disabled"}
+                  <span style={{ color: p.enabled ? "#16a34a" : "#dc2626", fontWeight: 600 }}>
+                    {p.enabled ? " Enabled" : " Disabled"}
                   </span>
                 </td>
               </tr>
@@ -624,11 +632,10 @@ function AdminPanel({ panelKey, onBack, vault, core, usdc, signer, account,
     </div>
   );
 
-  // ── Security Monitor ───────────────────────────────────────────────────────
   if (panelKey === "security") return (
     <div>
       <Back />
-      <h3 style={{ color: "#ef4444", marginTop: 0 }}>🛡️ Security Monitor</h3>
+      <h3 style={{ color: "#dc2626", marginTop: 0 }}>🛡️ Security Monitor</h3>
       <SecurityMonitor core={core} vaultBal={vaultBal} withLoading={withLoading} loading={loading} />
     </div>
   );
@@ -662,12 +669,12 @@ function AdminTab({ vault, core, usdc, signer, account, loading, withLoading,
     <div style={{ maxWidth: 900 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 24 }}>
         {[
-          { label: "Vault Balance", value: fmt(vaultBal) + " USDC",           color: "#22c55e" },
-          { label: "Số Plans",      value: plans.length + " plans",            color: "#6366f1" },
-          { label: "System Status", value: isPaused ? "⏸ PAUSED" : "▶ RUNNING", color: isPaused ? "#ef4444" : "#22c55e" },
+          { label: "Vault Balance", value: fmt(vaultBal) + " USDC",              color: "#16a34a" },
+          { label: "Số Plans",      value: plans.length + " plans",               color: "#006c6c" },
+          { label: "System Status", value: isPaused ? "⏸ PAUSED" : "▶ RUNNING",  color: isPaused ? "#dc2626" : "#16a34a" },
         ].map(s => (
           <div key={s.label} style={{ ...S.card, textAlign: "center", padding: 16 }}>
-            <div style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", marginBottom: 6 }}>{s.label}</div>
+            <div style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", marginBottom: 6 }}>{s.label}</div>
             <div style={{ fontWeight: 700, color: s.color, fontSize: 15 }}>{s.value}</div>
           </div>
         ))}
@@ -683,6 +690,7 @@ function AdminTab({ vault, core, usdc, signer, account, loading, withLoading,
           />
         </div>
       ) : (
+        // [CHANGED] Admin icon grid → nền xanh lá đậm qua AdminCard
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(155px,1fr))", gap: 16 }}>
           {MENU.map(m => (
             <AdminCard key={m.key} img={m.img} label={m.label} color={CARD_COLOR}
@@ -707,16 +715,16 @@ function OpenDepositModal({ plan, onClose, usdc, core, balance, loading, withLoa
   return (
     <div style={S.overlay}>
       <div style={S.modal}>
-        <h3 style={{ marginTop: 0 }}>Mở Deposit — Plan #{String(plan.id)}</h3>
-        <p style={{ color: "#94a3b8", fontSize: 14 }}>
+        <h3 style={{ marginTop: 0, color: "#0f172a" }}>Mở Deposit — Plan #{String(plan.id)}</h3>
+        <p style={{ color: "#64748b", fontSize: 14 }}>
           {fmtTenor(plan.tenorSeconds)} · {fmtApr(plan.aprBps)} APR · Penalty: {fmtApr(plan.earlyWithdrawPenaltyBps)}
         </p>
         <label style={S.label}>Số tiền (USDC)</label>
         <input style={S.input} type="number" placeholder="ví dụ: 1000"
           value={amount} onChange={e => setAmount(e.target.value)} />
-        <p style={{ color: "#94a3b8", fontSize: 12, margin: "6px 0 4px" }}>Số dư: {fmt(balance)} USDC</p>
+        <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 4px" }}>Số dư: {fmt(balance)} USDC</p>
         {interest && (
-          <p style={{ color: "#6366f1", fontSize: 13, margin: "0 0 12px" }}>
+          <p style={{ color: "#006c6c", fontSize: 13, margin: "0 0 12px" }}>
             💰 Lãi dự kiến: ~{interest} USDC sau {fmtTenor(plan.tenorSeconds)}
           </p>
         )}
@@ -742,7 +750,7 @@ function RenewModal({ deposit, plans, core, onClose, loading, withLoading }) {
   return (
     <div style={S.overlay}>
       <div style={S.modal}>
-        <h3 style={{ marginTop: 0 }}>Gia hạn Deposit #{String(deposit.id)}</h3>
+        <h3 style={{ marginTop: 0, color: "#0f172a" }}>Gia hạn Deposit #{String(deposit.id)}</h3>
         <label style={S.label}>Chọn Plan mới</label>
         <select style={{ ...S.input, marginTop: 4 }} value={planId} onChange={e => setPlanId(e.target.value)}>
           <option value="">-- Chọn plan --</option>
@@ -768,14 +776,12 @@ function RenewModal({ deposit, plans, core, onClose, loading, withLoading }) {
 }
 
 // ─── DepositCard ──────────────────────────────────────────────────────────────
-// gracePeriod (số giây) được truyền từ App — đọc thực tế từ contract
-function DepositCard({ dep, plans, core, isPaused, loading, withLoading, gracePeriod }) {
+function DepositCard({ dep, plans, core, isPaused, loading, withLoading, gracePeriod, account }) {
   const [modal, setModal] = useState(null);
 
-  // ── Live countdown: tick mỗi giây khi deposit còn Active ──────────────────
   const [now, setNow] = useState(Math.floor(Date.now() / 1000));
   useEffect(() => {
-    if (dep.status !== 0n) return; // không tick nếu không còn Active
+    if (dep.status !== 0n) return;
     const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(t);
   }, [dep.status]);
@@ -784,23 +790,26 @@ function DepositCard({ dep, plans, core, isPaused, loading, withLoading, gracePe
   const maturity       = Number(dep.maturityAt);
   const isMatured      = isActive && now >= maturity;
   const isEarly        = isActive && now < maturity;
-
-  // dùng gracePeriod từ prop (đọc thực tế từ contract)
   const gracePeriodEnd = maturity + gracePeriod;
-  const canAutoRenew   = isActive && now >= gracePeriodEnd;
 
   const estInterest = isActive
     ? fmt((dep.principal * dep.aprBpsAtOpen * dep.tenorSeconds) / (365n * 86400n * 10000n))
     : "—";
 
-  // Format thời gian còn lại — hiển thị đến giây khi < 1 giờ
+  const isDepositor = dep.depositor?.toLowerCase() === account?.toLowerCase();
+  const isNftOwnerNotDepositor = !isDepositor;
+
+  // [CHANGED] fmtRemaining: luôn hiển thị đủ phút và giây
   const fmtRemaining = (endTs) => {
     const rem = endTs - now;
-    if (rem <= 0)    return "đã đáo hạn";
-    if (rem < 60)    return `${rem} giây`;
-    if (rem < 3600)  return `${Math.floor(rem / 60)} phút ${rem % 60} giây`;
-    if (rem < 86400) return `${Math.floor(rem / 3600)} giờ ${Math.floor((rem % 3600) / 60)} phút`;
-    return `${Math.floor(rem / 86400)} ngày ${Math.floor((rem % 86400) / 3600)} giờ`;
+    if (rem <= 0) return "đã đáo hạn";
+    const days  = Math.floor(rem / 86400);
+    const hours = Math.floor((rem % 86400) / 3600);
+    const mins  = Math.floor((rem % 3600) / 60);
+    const secs  = rem % 60;
+    if (days > 0)  return `${days} ngày ${hours} giờ ${mins} phút ${secs} giây`;
+    if (hours > 0) return `${hours} giờ ${mins} phút ${secs} giây`;
+    return `${mins} phút ${secs} giây`;
   };
 
   return (
@@ -812,18 +821,19 @@ function DepositCard({ dep, plans, core, isPaused, loading, withLoading, gracePe
 
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontWeight: 700, fontSize: 16 }}>
+        <span style={{ fontWeight: 700, fontSize: 16, color: "#0f172a" }}>
           Deposit #{String(dep.originalId ?? dep.id)}
           {dep.renewCount > 0 && (
-            <span style={{ color: "#64748b", fontSize: 13, fontWeight: 400, marginLeft: 8 }}>
+            <span style={{ color: "#94a3b8", fontSize: 13, fontWeight: 400, marginLeft: 8 }}>
               (hiện tại #{String(dep.id)})
             </span>
           )}
         </span>
         <span style={{
-          background: STATUS_COLOR[Number(dep.status)] + "22",
+          background: STATUS_COLOR[Number(dep.status)] + "18",
           color: STATUS_COLOR[Number(dep.status)],
           padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+          border: `1px solid ${STATUS_COLOR[Number(dep.status)]}44`,
         }}>
           {STATUS[Number(dep.status)]}
         </span>
@@ -835,6 +845,7 @@ function DepositCard({ dep, plans, core, isPaused, loading, withLoading, gracePe
         <InfoItem label="Kỳ hạn"           value={fmtTenor(dep.tenorSeconds)} />
         <InfoItem label="APR"              value={fmtApr(dep.aprBpsAtOpen)} />
         <InfoItem label="Lãi dự kiến"      value={estInterest + " USDC"} />
+        {/* [CHANGED] Hiển thị ngày+giờ:phút:giây đầy đủ */}
         <InfoItem label="Ngày mở gốc"      value={fmtDate(dep.originalStartAt || dep.startAt)} />
         <InfoItem label="Đáo hạn gần nhất" value={fmtDate(dep.maturityAt)} />
       </div>
@@ -842,30 +853,42 @@ function DepositCard({ dep, plans, core, isPaused, loading, withLoading, gracePe
       {/* Renew count badge */}
       {dep.renewCount > 0 && (
         <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ background: "#6366f122", color: "#a5b4fc", fontSize: 12, padding: "2px 10px", borderRadius: 20, fontWeight: 600 }}>
-            🔄 Đã gia hạn {dep.renewCount} lần
+          <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: 12, padding: "2px 10px", borderRadius: 20, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <img src="/ic_renew.png" alt="" style={{ width: 13, height: 13, objectFit: "contain" }} onError={e => e.target.style.display="none"} />
+            Đã gia hạn {dep.renewCount} lần
           </span>
-          <span style={{ color: "#475569", fontSize: 12 }}>
+          <span style={{ color: "#94a3b8", fontSize: 12 }}>
             Kỳ hiện tại bắt đầu: {fmtDate(dep.startAt)}
           </span>
         </div>
       )}
 
-      {/* Status banners */}
-      {isEarly && !isPaused && (
-        <div style={{ marginTop: 8, padding: "8px 12px", background: "#1e1b4b", borderRadius: 8, color: "#a5b4fc", fontSize: 13 }}>
-          ⏳ Còn {fmtRemaining(maturity)} đến đáo hạn
-        </div>
-      )}
-      {isMatured && !canAutoRenew && !isPaused && (
-        <div style={{ marginTop: 8, padding: "8px 12px", background: "#1c1917", borderRadius: 8, color: "#fbbf24", fontSize: 13 }}>
-          {/* ← THAY ĐỔI: thời gian còn lại tính từ gracePeriodEnd thực tế của contract */}
-          ⏱ Trong grace period — còn {fmtRemaining(gracePeriodEnd)} để tự rút hoặc gia hạn thủ công
+      {/* Banner cảnh báo NFT owner không phải depositor */}
+      {isNftOwnerNotDepositor && isActive && (
+        <div style={{ marginTop: 8, padding: "8px 12px", background: "#fffbeb", borderRadius: 8, border: "1px solid #fcd34d", fontSize: 12 }}>
+          <span style={{ color: "#b45309", fontWeight: 600 }}>⚠️ Bạn giữ NFT nhưng không phải depositor gốc</span>
+          <div style={{ color: "#92400e", marginTop: 3 }}>
+            Depositor: <code style={{ color: "#b45309", fontSize: 11 }}>{fmtAddr(dep.depositor)}</code>
+            {" "}— chỉ họ mới rút được tiền. Bạn chỉ có thể gia hạn.
+          </div>
         </div>
       )}
 
+      {/* Status banners */}
+      {isEarly && !isPaused && (
+        <div style={{ marginTop: 8, padding: "8px 12px", background: "#e6f7f7", borderRadius: 8, color: "#005252", fontSize: 13, border: "1px solid #99d4d4", display: "flex", alignItems: "center", gap: 8 }}>
+          <img src="/ic_countdown.png" alt="" style={{ width: 16, height: 16, objectFit: "contain", flexShrink: 0 }} onError={e => e.target.style.display="none"} />
+          Còn {fmtRemaining(maturity)} đến đáo hạn
+        </div>
+      )}
+      {isMatured && now < gracePeriodEnd && !isPaused && (
+        <div style={{ marginTop: 8, padding: "8px 12px", background: "#fffbeb", borderRadius: 8, color: "#b45309", fontSize: 13, border: "1px solid #fcd34d", display: "flex", alignItems: "center", gap: 8 }}>
+          <img src="/ic_countdown.png" alt="" style={{ width: 16, height: 16, objectFit: "contain", flexShrink: 0 }} onError={e => e.target.style.display="none"} />
+          Trong grace period — còn {fmtRemaining(gracePeriodEnd)} để tự rút hoặc gia hạn thủ công
+        </div>
+      )}
       {isPaused && isActive && (
-        <div style={{ marginTop: 8, padding: "10px 14px", background: "#450a0a", borderRadius: 8, color: "#fca5a5", fontSize: 13, textAlign: "center" }}>
+        <div style={{ marginTop: 8, padding: "10px 14px", background: "#fef2f2", borderRadius: 8, color: "#dc2626", fontSize: 13, textAlign: "center", border: "1px solid #fca5a5" }}>
           ⏸ Hệ thống đang tạm dừng — mọi giao dịch bị chặn
         </div>
       )}
@@ -873,26 +896,110 @@ function DepositCard({ dep, plans, core, isPaused, loading, withLoading, gracePe
       {/* Action buttons */}
       {isActive && !isPaused && (
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-          {isEarly && (
-            <button style={S.btnD} onClick={() => {
+          {isEarly && isDepositor && (
+            <button style={{ ...S.btnD, display: "flex", alignItems: "center", gap: 7 }} onClick={() => {
               if (!window.confirm(`Rút sớm mất ${fmtApr(dep.penaltyBpsAtOpen)} phí phạt.\nBạn nhận: ${fmt(dep.principal - dep.principal * dep.penaltyBpsAtOpen / 10000n)} USDC\nTiếp tục?`)) return;
               withLoading("Rút sớm", async () => { await (await core.earlyWithdraw(dep.id)).wait(); });
             }}>
-              ⚠️ Rút sớm (mất phạt)
+              <img src="/ic_warning.png" alt="" style={{ width: 16, height: 16, objectFit: "contain" }} onError={e => e.target.style.display="none"} />
+              Rút sớm (mất phạt)
+            </button>
+          )}
+          {isMatured && isDepositor && (
+            <button style={S.btnP}
+              onClick={() => withLoading("Rút tiền", async () => { await (await core.withdrawAtMaturity(dep.id)).wait(); })}>
+               Rút tiền gốc & Lãi
             </button>
           )}
           {isMatured && (
-            <>
-              <button style={S.btnP}
-                onClick={() => withLoading("Rút tiền", async () => { await (await core.withdrawAtMaturity(dep.id)).wait(); })}>
-                💰 Rút + Lãi
-              </button>
-              <button style={S.btnA} onClick={() => setModal("renew")}>🔄 Gia hạn</button>
-            </>
+            <button style={{ ...S.btnA, display: "flex", alignItems: "center", gap: 7 }} onClick={() => setModal("renew")}>
+              <img src="" alt="" style={{ width: 16, height: 16, objectFit: "contain" }} onError={e => e.target.style.display="none"} />
+              Gia hạn
+            </button>
           )}
-
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── DepositFilter ────────────────────────────────────────────────────────────
+function DepositFilter({ deposits, filter, setFilter }) {
+  const FILTERS = [
+    { key: "all",       label: "Tất cả" },
+    { key: "active",    label: "Active" },
+    { key: "withdrawn", label: "Withdrawn" },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      {FILTERS.map(f => (
+        <button
+          key={f.key}
+          onClick={() => setFilter(f.key)}
+          style={{
+            padding: "6px 14px",
+            borderRadius: 20,
+            border: filter === f.key ? "1.5px solid #006c6c" : "1.5px solid #e2e8f0",
+            background: filter === f.key ? "#006c6c" : "#ffffff",
+            color: filter === f.key ? "#ffffff" : "#64748b",
+            fontWeight: 600,
+            fontSize: 12,
+            cursor: "pointer",
+            transition: "all 0.15s",
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+          }}
+        >
+          {f.label}
+          {f.key !== "all" && (
+            <span style={{
+              background: filter === f.key ? "rgba(255,255,255,0.25)" : "#f1f5f9",
+              color: filter === f.key ? "#fff" : "#94a3b8",
+              borderRadius: 10,
+              padding: "1px 7px",
+              fontSize: 11,
+            }}>
+              {f.key === "active"    ? deposits.filter(d => Number(d.status) === 0).length : ""}
+              {f.key === "withdrawn" ? deposits.filter(d => Number(d.status) === 1).length : ""}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── DepositsTab ─────────────────────────────────────────────────────────────
+function DepositsTab({ deposits, plans, core, isPaused, loading, withLoading, gracePeriod, account, onSwitchToPlans, filter }) {
+  const filtered = deposits.filter(d => {
+    if (filter === "all")       return true;
+    if (filter === "active")    return Number(d.status) === 0;
+    if (filter === "withdrawn") return Number(d.status) === 1;
+    return true;
+  });
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {deposits.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 48, color: "#64748b" }}>
+            <p style={{ fontSize: 48 }}>📭</p>
+            <p>Bạn chưa có deposit nào.</p>
+            <button style={S.btnP} onClick={onSwitchToPlans}>Xem Saving Plans</button>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 48, color: "#64748b" }}>
+            <p style={{ fontSize: 32 }}>🔍</p>
+            <p>Không có deposit nào ở trạng thái này.</p>
+          </div>
+        ) : filtered.map(d => (
+          <DepositCard key={String(d.id)} dep={d} plans={plans} core={core}
+            isPaused={isPaused} loading={loading} withLoading={withLoading}
+            gracePeriod={gracePeriod} account={account}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -917,10 +1024,9 @@ export default function App() {
   const [loading,     setLoading]     = useState("");
   const [toast,       setToast]       = useState(null);
   const [openModal,   setOpenModal]   = useState(null);
-  // ← THÊM MỚI: state lưu grace period đọc từ contract (default 3 ngày)
   const [gracePeriod, setGracePeriod] = useState(3 * 86400);
+  const [depositFilter, setDepositFilter] = useState("all");
 
-  // ── Connect / Disconnect ──────────────────────────────────────────────────
   const disconnect = () => {
     setSigner(null); setAccount(""); setCore(null); setUsdc(null); setVault(null);
     setPlans([]); setDeposits([]); setBalance(0n); setVaultBal(0n);
@@ -986,30 +1092,20 @@ export default function App() {
       }
 
       const traceOrigin = async (idBigInt) => {
-        let curId  = String(BigInt(idBigInt));
-        let count  = 0;
+        let curId   = String(BigInt(idBigInt));
+        let count   = 0;
         const visited = new Set();
-
         while (renewedFromStr[curId] !== undefined) {
           if (visited.has(curId)) break;
           visited.add(curId);
           curId = renewedFromStr[curId];
           count++;
         }
-
         try {
           const orig = await core.getDeposit(BigInt(curId));
-          return {
-            originalStartAt: orig[5],
-            renewCount:      count,
-            originalId:      BigInt(curId),
-          };
+          return { originalStartAt: orig[5], renewCount: count, originalId: BigInt(curId) };
         } catch {
-          return {
-            originalStartAt: null,
-            renewCount:      count,
-            originalId:      BigInt(idBigInt),
-          };
+          return { originalStartAt: null, renewCount: count, originalId: BigInt(idBigInt) };
         }
       };
 
@@ -1017,10 +1113,11 @@ export default function App() {
       for (const idStr of allIds) {
         const id = BigInt(idStr);
         try {
-          const owner = await core.ownerOf(id);
-          if (owner.toLowerCase() !== account.toLowerCase()) continue;
-
           const d = await core.getDeposit(id);
+          const depositor = d[8];
+
+          if (depositor.toLowerCase() !== account.toLowerCase()) continue;
+
           const status = Number(d[7]);
           if (status !== 0 && status !== 1) continue;
 
@@ -1036,6 +1133,7 @@ export default function App() {
             startAt:          d[5],
             maturityAt:       d[6],
             status:           d[7],
+            depositor:        d[8],
             originalStartAt:  originalStartAt ?? d[5],
             originalId:       originalId ?? id,
             renewCount,
@@ -1063,7 +1161,6 @@ export default function App() {
       ]);
       setIsPaused(vp || cp);
     } catch {}
-    // ← THÊM MỚI: đọc gracePeriod thực tế từ contract
     try {
       const gp = await core.gracePeriod();
       setGracePeriod(Number(gp));
@@ -1100,15 +1197,16 @@ export default function App() {
       reloadAll();
     } catch (e) {
       let msg = "Giao dịch thất bại";
-      if (e.reason)                                         msg = e.reason;
-      else if (e.message?.includes("user rejected"))        msg = "Bạn đã từ chối giao dịch";
-      else if (e.message?.includes("insufficient funds"))   msg = "Không đủ ETH để trả gas";
-      else if (e.message?.includes("ERC20Insufficient"))    msg = "Số dư USDC không đủ";
-      else if (e.message?.includes("PlanIsDisabled"))       msg = "Plan đã bị tắt";
-      else if (e.message?.includes("DepositNotMatured"))    msg = "Deposit chưa đến đáo hạn";
-      else if (e.message?.includes("NotDepositOwner"))      msg = "Bạn không phải chủ deposit";
-      else if (e.message?.includes("GracePeriodNotExpired")) msg = "Chưa hết grace period";
-      else if (e.message)                                   msg = e.message.slice(0, 120);
+      if (e.reason)                                              msg = e.reason;
+      else if (e.message?.includes("user rejected"))             msg = "Bạn đã từ chối giao dịch";
+      else if (e.message?.includes("insufficient funds"))        msg = "Không đủ ETH để trả gas";
+      else if (e.message?.includes("ERC20Insufficient"))         msg = "Số dư USDC không đủ";
+      else if (e.message?.includes("PlanIsDisabled"))            msg = "Plan đã bị tắt";
+      else if (e.message?.includes("DepositNotMatured"))         msg = "Deposit chưa đến đáo hạn";
+      else if (e.message?.includes("NotDepositor"))              msg = "Bạn không phải depositor — không thể rút tiền";
+      else if (e.message?.includes("NotNftOwnerOrDepositor"))    msg = "Bạn không phải depositor hoặc NFT owner";
+      else if (e.message?.includes("GracePeriodNotExpired"))     msg = "Chưa hết grace period";
+      else if (e.message)                                        msg = e.message.slice(0, 120);
       notify(msg, false);
       console.error(label, e);
     } finally {
@@ -1116,43 +1214,39 @@ export default function App() {
     }
   };
 
-  // ── Tabs ──────────────────────────────────────────────────────────────────
   const TABS = [
     { key: "plans",    img: "/saving.png",  label: "Saving Plans" },
     { key: "deposits", img: "/deposit.png", label: `Deposits (${deposits.length})` },
     ...(isAdmin ? [{ key: "admin", img: "/admin.png", label: "Admin" }] : []),
   ];
 
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div style={S.page}>
-      {/* Toast */}
       {toast && (
         <div style={{ ...S.toast, background: toast.ok ? "#16a34a" : "#dc2626" }}>{toast.msg}</div>
       )}
 
-      {/* Header */}
       <header style={S.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <img src="/logo.png" alt="logo"
             style={{ width: 36, height: 36, objectFit: "contain", borderRadius: 8 }}
             onError={e => { e.target.style.display = "none"; }}
           />
-          <span style={{ fontWeight: 800, fontSize: 20, color: "#e2e8f0" }}>ChainSave</span>
+          <span style={{ fontWeight: 800, fontSize: 20, color: "#0f172a" }}>ChainSave</span>
           {isAdmin && (
-            <span style={{ background: "#f59e0b22", color: "#f59e0b", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, border: "1px solid #f59e0b44" }}>
+            <span style={{ background: "#e6f7f7", color: "#006c6c", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, border: "1px solid #99d4d4" }}>
               ADMIN
             </span>
           )}
           {isPaused && (
-            <span style={{ background: "#ef444422", color: "#ef4444", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, border: "1px solid #ef444444" }}>
+            <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, border: "1px solid #fca5a5" }}>
               ⏸ PAUSED
             </span>
           )}
         </div>
         {account ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ color: "#94a3b8", fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ color: "#475569", fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
               <img src="/ic_usdc_coin.png" alt="USDC"
                 style={{ width: 18, height: 18, objectFit: "contain" }}
                 onError={e => e.target.style.display = "none"}
@@ -1169,18 +1263,8 @@ export default function App() {
               </span>
             )}
             <span
-              style={{
-                ...S.chip,
-                fontFamily: "monospace",
-                fontSize: 11,
-                maxWidth: "none",
-                whiteSpace: "nowrap",
-                cursor: "pointer"
-              }}
-              onClick={() => {
-                navigator.clipboard.writeText(account);
-                notify("Đã copy địa chỉ ✓");
-              }}
+              style={{ ...S.chip, fontFamily: "monospace", fontSize: 11, maxWidth: "none", whiteSpace: "nowrap", cursor: "pointer" }}
+              onClick={() => { navigator.clipboard.writeText(account); notify("Đã copy địa chỉ ✓"); }}
               title="Click để copy"
             >
               {account}
@@ -1194,14 +1278,13 @@ export default function App() {
         )}
       </header>
 
-      {/* Hero (chưa kết nối) */}
       {!account ? (
         <div style={S.hero}>
-          <h1 style={{ fontSize: 42, fontWeight: 800, color: "#e2e8f0", textAlign: "center" }}>
+          <h1 style={{ fontSize: 42, fontWeight: 800, color: "#0f172a", textAlign: "center" }}>
             Kiếm lãi on-chain.<br />
-            <span style={{ color: "#6366f1" }}>Tiết kiệm phi tập trung.</span>
+            <span style={{ color: "#006c6c" }}>Tiết kiệm phi tập trung.</span>
           </h1>
-          <p style={{ color: "#94a3b8", maxWidth: 480, lineHeight: 1.7, textAlign: "center" }}>
+          <p style={{ color: "#64748b", maxWidth: 480, lineHeight: 1.7, textAlign: "center" }}>
             Khoá USDC theo kỳ hạn, nhận lãi suất cố định, nắm giữ chứng chỉ NFT. Không cần ngân hàng.
           </p>
           <button style={{ ...S.btnP, padding: "14px 32px", fontSize: 16 }} onClick={connect}>
@@ -1210,22 +1293,25 @@ export default function App() {
         </div>
       ) : (
         <main style={S.main}>
-          {/* Tabs */}
-          <div style={S.tabs}>
-            {TABS.map(t => (
-              <button key={t.key}
-                style={{ ...S.tab, ...(tab === t.key ? S.tabOn : {}), ...(t.key === "admin" ? S.tabAdm : {}) }}
-                onClick={() => setTab(t.key)}>
-                <img src={t.img} alt={t.label}
-                  style={{ width: 18, height: 18, objectFit: "contain", filter: tab === t.key ? "brightness(10)" : "brightness(3)" }}
-                  onError={e => e.target.style.display = "none"}
-                />
-                {t.label}
-              </button>
-            ))}
+          <div style={{ ...S.tabs, justifyContent: "space-between", alignItems: "center", flexWrap: "nowrap" }}>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {TABS.map(t => (
+                <button key={t.key}
+                  style={{ ...S.tab, ...(tab === t.key ? S.tabOn : {}), ...(t.key === "admin" ? S.tabAdm : {}) }}
+                  onClick={() => setTab(t.key)}>
+                  <img src={t.img} alt={t.label}
+                    style={{ width: 18, height: 18, objectFit: "contain", filter: tab === t.key ? "brightness(10)" : "brightness(0.4)" }}
+                    onError={e => e.target.style.display = "none"}
+                  />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {tab === "deposits" && (
+              <DepositFilter deposits={deposits} filter={depositFilter} setFilter={setDepositFilter} />
+            )}
           </div>
 
-          {/* Plans Tab */}
           {tab === "plans" && (
             <>
               {openModal && (
@@ -1235,30 +1321,82 @@ export default function App() {
                   loading={loading} withLoading={withLoading}
                 />
               )}
+              {/* [CHANGED] Saving Plan cards → teal dark theme */}
               <div style={S.grid}>
                 {plans.length === 0 && <p style={{ color: "#64748b" }}>Không có plan nào.</p>}
                 {plans.map(plan => (
-                  <div key={String(plan.id)} style={{ ...S.card, opacity: plan.enabled ? 1 : 0.5 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontWeight: 700, fontSize: 18 }}>{fmtTenor(plan.tenorSeconds)} Plan</span>
-                      {!plan.enabled && <span style={{ color: "#ef4444", fontSize: 12 }}>Disabled</span>}
+                  <div key={String(plan.id)} style={{
+                    background: plan.enabled
+                      ? "linear-gradient(145deg, #007a7a 0%, #005252 60%, #003d3d 100%)"
+                      : "linear-gradient(145deg, #5a9a9a 0%, #3a7070 60%, #2a5555 100%)",
+                    borderRadius: 16,
+                    padding: 24,
+                    border: "1px solid #00606060",
+                    boxShadow: "0 4px 20px #006c6c44",
+                    opacity: plan.enabled ? 1 : 0.6,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 0,
+                  }}>
+                    {/* Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+                      <span style={{ fontWeight: 700, fontSize: 16, color: "#ffffff" }}>
+                        {fmtTenor(plan.tenorSeconds)} Plan
+                      </span>
+                      {!plan.enabled && (
+                        <span style={{ color: "#fca5a5", fontSize: 12, fontWeight: 600 }}>Disabled</span>
+                      )}
                     </div>
-                    <div style={{ fontSize: 36, fontWeight: 800, color: "#6366f1", margin: "8px 0" }}>
+
+                    {/* APR */}
+                    <div style={{ fontSize: 42, fontWeight: 800, color: "#ffffff", margin: "4px 0 2px", lineHeight: 1.1 }}>
                       {fmtApr(plan.aprBps)}
                     </div>
-                    <div style={S.igrid}>
-                      <InfoItem label="Min Deposit"   value={plan.minDeposit > 0n ? fmt(plan.minDeposit) + " USDC" : "Không giới hạn"} />
-                      <InfoItem label="Max Deposit"   value={plan.maxDeposit > 0n ? fmt(plan.maxDeposit) + " USDC" : "Không giới hạn"} />
-                      <InfoItem label="Phạt rút sớm"  value={fmtApr(plan.earlyWithdrawPenaltyBps)} />
-                      <InfoItem label="Plan ID"        value={"#" + String(plan.id)} />
+                    <div style={{ color: "#a7d4d4", fontSize: 12, marginBottom: 16, letterSpacing: 0.3 }}>
+                      APR hàng năm
                     </div>
+
+                    {/* Info grid */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px", marginBottom: 20 }}>
+                      {[
+                        { label: "MIN DEPOSIT",   value: plan.minDeposit > 0n ? fmt(plan.minDeposit) + " USDC" : "Không giới hạn" },
+                        { label: "MAX DEPOSIT",   value: plan.maxDeposit > 0n ? fmt(plan.maxDeposit) + " USDC" : "Không giới hạn" },
+                        { label: "PHẠT RÚT SỚM",  value: fmtApr(plan.earlyWithdrawPenaltyBps) },
+                        { label: "PLAN ID",        value: "#" + String(plan.id) },
+                      ].map(item => (
+                        <div key={item.label}>
+                          <div style={{ color: "#7fbfbf", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 3 }}>
+                            {item.label}
+                          </div>
+                          <div style={{ color: "#ffffff", fontWeight: 700, fontSize: 14 }}>
+                            {item.value}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Button */}
                     <button
-                      style={{ ...S.btnP, width: "100%", marginTop: 12 }}
+                      style={{
+                        background: "transparent",
+                        color: "#ffffff",
+                        border: "1.5px solid rgba(255,255,255,0.55)",
+                        borderRadius: 10,
+                        padding: "12px 18px",
+                        fontWeight: 600,
+                        fontSize: 15,
+                        cursor: plan.enabled && !loading && !isPaused ? "pointer" : "not-allowed",
+                        width: "100%",
+                        marginTop: "auto",
+                        opacity: plan.enabled && !isPaused ? 1 : 0.6,
+                        transition: "opacity 0.15s, border-color 0.15s",
+                      }}
                       onClick={() => {
                         if (isPaused) { notify("Hệ thống đang tạm dừng", false); return; }
                         setOpenModal(plan);
                       }}
-                      disabled={!plan.enabled || !!loading || isPaused}>
+                      disabled={!plan.enabled || !!loading || isPaused}
+                    >
                       Mở Deposit
                     </button>
                   </div>
@@ -1267,25 +1405,16 @@ export default function App() {
             </>
           )}
 
-          {/* Deposits Tab */}
           {tab === "deposits" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {deposits.length === 0 ? (
-                <div style={{ textAlign: "center", padding: 48, color: "#64748b" }}>
-                  <p style={{ fontSize: 48 }}>📭</p>
-                  <p>Bạn chưa có deposit nào.</p>
-                  <button style={S.btnP} onClick={() => setTab("plans")}>Xem Saving Plans</button>
-                </div>
-              ) : deposits.map(d => (
-                <DepositCard key={String(d.id)} dep={d} plans={plans} core={core}
-                  isPaused={isPaused} loading={loading} withLoading={withLoading}
-                  gracePeriod={gracePeriod} /* ← THÊM MỚI: truyền gracePeriod thực tế */
-                />
-              ))}
-            </div>
+            <DepositsTab
+              deposits={deposits} plans={plans} core={core}
+              isPaused={isPaused} loading={loading} withLoading={withLoading}
+              gracePeriod={gracePeriod} account={account}
+              onSwitchToPlans={() => setTab("plans")}
+              filter={depositFilter}
+            />
           )}
 
-          {/* Admin Tab */}
           {tab === "admin" && isAdmin && (
             <AdminTab
               vault={vault} core={core} usdc={usdc} signer={signer} account={account}
@@ -1295,7 +1424,7 @@ export default function App() {
             />
           )}
           {tab === "admin" && !isAdmin && (
-            <div style={{ textAlign: "center", padding: 48, color: "#ef4444" }}>
+            <div style={{ textAlign: "center", padding: 48, color: "#dc2626" }}>
               <p style={{ fontSize: 48 }}>🚫</p>
               <p>Bạn không có quyền Admin.</p>
             </div>
