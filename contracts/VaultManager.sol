@@ -120,3 +120,4 @@ contract VaultManager is Ownable, Pausable {
         return token.balanceOf(address(this));
     }
 }
+
