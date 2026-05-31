@@ -71,6 +71,7 @@ chainsave/
 │   ├── MockUSDC.sol
 │   ├── SavingCore.sol
 │   └── VaultManager.sol
+|   └── SavingCert.sol
 ├── deploy/                 # Deployment script (auto-updates frontend ABI)
 │   └── deploy.ts
 ├── scripts/                # Supporting scripts
