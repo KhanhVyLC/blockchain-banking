@@ -1,60 +1,74 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "./VaultManager.sol";
+import "./SavingCert.sol";
 
-/// @title SavingCore
-/// @notice Manages saving plans and deposit certificates (ERC721 NFTs).
-///         Users lock tokens for a fixed tenor, earn simple interest, and can
-///         withdraw, manually renew, or be auto-renewed after the grace period.
-contract SavingCore is ERC721, Ownable, Pausable {
+/// @title SavingCore (v2 — Dual Ownership)
+/// @notice Quản lý saving plans và deposit certificates.
+///
+/// ┌──────────────────────────────────────────────────────────────────┐
+/// │  DUAL OWNERSHIP MODEL                                            │
+/// │                                                                  │
+/// │  depositor  = địa chỉ nạp tiền, ghi nhận vĩnh viễn khi mở        │
+/// │               deposit. Chỉ depositor mới rút được tiền.          │
+/// │                                                                  │
+/// │  NFT owner  = người giữ SavingCert NFT hiện tại. NFT có thể      │
+/// │               transfer tự do (bán, tặng, thế chấp DeFi).         │
+/// │               NFT owner được gia hạn thay depositor.             │
+/// │                                                                  │
+/// │  ⇒ Mất NFT  ≠ Mất tiền. Depositor luôn rút được.                │
+/// └──────────────────────────────────────────────────────────────────┘
+///
+/// @dev SavingCore KHÔNG kế thừa ERC721; NFT được uỷ thác cho SavingCert.
+contract SavingCore is Ownable, Pausable {
     using SafeERC20 for IERC20;
 
     // ─────────────────────── Constants ───────────────────────
 
-    uint256 public constant SECONDS_PER_YEAR = 365 * 24 * 3600;
-    uint256 public constant BPS_DENOMINATOR   = 10_000;
+    uint256 public constant SECONDS_PER_YEAR    = 365 * 24 * 3600;
+    uint256 public constant BPS_DENOMINATOR     = 10_000;
     uint256 public constant GRACE_PERIOD_DEFAULT = 3 days;
 
-    /// @notice Grace period có thể thay đổi bởi Admin (default 3 ngày)
     uint256 public gracePeriod = GRACE_PERIOD_DEFAULT;
 
     // ─────────────────────── Types ───────────────────────
 
-    /// @notice Status of a deposit certificate
     enum DepositStatus { Active, Withdrawn, ManualRenewed, AutoRenewed }
 
-    /// @notice A saving plan created by the admin
     struct SavingPlan {
-        uint256 tenorSeconds; ///< Kỳ hạn tính bằng giây (hỗ trợ cả giờ và ngày)
-        uint256 aprBps;           // Annual Percentage Rate in basis points
-        uint256 minDeposit;       // 0 = no minimum
-        uint256 maxDeposit;       // 0 = no maximum
+        uint256 tenorSeconds;
+        uint256 aprBps;
+        uint256 minDeposit;
+        uint256 maxDeposit;
         uint256 earlyWithdrawPenaltyBps;
         bool    enabled;
     }
 
-    /// @notice A deposit certificate (minted as ERC721)
     struct DepositCert {
         uint256 planId;
-        uint256 principal;        // tokens locked (smallest unit)
-        uint256 aprBpsAtOpen;     // snapshot of APR at open time
-        uint256 penaltyBpsAtOpen; // snapshot of penalty at open time
-        uint256 tenorSeconds;     // snapshot of tenor at open time (giây)
+        uint256 principal;
+        uint256 aprBpsAtOpen;
+        uint256 penaltyBpsAtOpen;
+        uint256 tenorSeconds;
         uint256 startAt;
         uint256 maturityAt;
         DepositStatus status;
+        // ─── Dual-ownership fields ───────────────────────────────
+        /// @notice Địa chỉ nạp tiền ban đầu — KHÔNG thay đổi bao giờ.
+        ///         Đây là địa chỉ duy nhất có quyền rút gốc + lãi.
+        address depositor;
     }
 
     // ─────────────────────── State ───────────────────────
 
     IERC20       public immutable token;
     VaultManager public immutable vault;
+    SavingCert   public immutable cert;      // NFT contract tách biệt
 
     uint256 public nextPlanId;
     uint256 public nextDepositId;
@@ -62,12 +76,8 @@ contract SavingCore is ERC721, Ownable, Pausable {
     mapping(uint256 => SavingPlan)  public plans;
     mapping(uint256 => DepositCert) public deposits;
 
-    /// @notice Tổng tiền gốc đang khoá trong contract (đối soát)
     uint256 public totalPrincipalLocked;
-
-    /// @notice Tổng lãi phải trả khi tất cả deposit đáo hạn (worst-case)
     uint256 public totalInterestOwed;
-
 
     // ─────────────────────── Events ───────────────────────
 
@@ -75,21 +85,24 @@ contract SavingCore is ERC721, Ownable, Pausable {
     event PlanUpdated(uint256 indexed planId, uint256 newAprBps);
     event PlanEnabled(uint256 indexed planId);
     event PlanDisabled(uint256 indexed planId);
+
     event DepositOpened(
         uint256 indexed depositId,
-        address indexed owner,
+        address indexed depositor,
         uint256 indexed planId,
         uint256 principal,
         uint256 maturityAt,
         uint256 aprBpsAtOpen
     );
+
     event Withdrawn(
         uint256 indexed depositId,
-        address indexed owner,
+        address indexed depositor,
         uint256 principal,
         uint256 interest,
         bool    isEarly
     );
+
     event Renewed(
         uint256 indexed oldDepositId,
         uint256 indexed newDepositId,
@@ -97,25 +110,20 @@ contract SavingCore is ERC721, Ownable, Pausable {
         uint256 indexed newPlanId
     );
 
-    /// @notice Phát ra khi Admin thay đổi grace period
     event GracePeriodUpdated(uint256 newGracePeriod);
-
-    /// @notice Phát ra khi penalty được chuyển đến feeReceiver
     event PenaltyCollected(uint256 indexed depositId, address indexed receiver, uint256 amount);
 
-    /// @notice Phát ra khi vault không đủ lãi — user vẫn nhận được gốc
     event InterestShortfall(
         uint256 indexed depositId,
-        address indexed owner,
+        address indexed depositor,
         uint256 principal,
         uint256 interestOwed,
         uint256 interestPaid
     );
 
-    /// @notice Phát ra khi Admin force-close một deposit
     event AdminForceClosed(
         uint256 indexed depositId,
-        address indexed owner,
+        address indexed depositor,
         uint256 principal
     );
 
@@ -126,34 +134,28 @@ contract SavingCore is ERC721, Ownable, Pausable {
     error AmountBelowMinimum(uint256 amount, uint256 min);
     error AmountAboveMaximum(uint256 amount, uint256 max);
     error DepositNotActive(uint256 depositId);
-    error NotDepositOwner(uint256 depositId, address caller);
+    error NotDepositor(uint256 depositId, address caller);
+    error NotNftOwnerOrDepositor(uint256 depositId, address caller);
     error DepositNotMatured(uint256 depositId, uint256 maturityAt, uint256 now_);
     error GracePeriodNotExpired(uint256 depositId, uint256 gracePeriodEnd, uint256 now_);
     error ZeroAmount();
     error InvalidApr();
-    error VaultInsufficientForInterest(uint256 available, uint256 required);
-
 
     // ─────────────────────── Constructor ───────────────────────
 
     /// @param _token   ERC20 token address (MockUSDC)
     /// @param _vault   VaultManager address
-    constructor(address _token, address _vault)
-        ERC721("Saving Certificate", "SCERT")
+    /// @param _cert    SavingCert (ERC721) address
+    constructor(address _token, address _vault, address _cert)
         Ownable(msg.sender)
     {
         token = IERC20(_token);
         vault = VaultManager(_vault);
+        cert  = SavingCert(_cert);
     }
 
     // ─────────────────────── Admin ───────────────────────
 
-    /// @notice Create a new saving plan
-    /// @param tenorSeconds             Kỳ hạn tính bằng giây (ví dụ: 3600=1h, 86400=1d, 604800=7d)
-    /// @param aprBps                   Annual rate in basis points (e.g. 250 = 2.5%)
-    /// @param minDeposit               Minimum deposit amount (0 = none)
-    /// @param maxDeposit               Maximum deposit amount (0 = none)
-    /// @param earlyWithdrawPenaltyBps  Penalty in bps for early withdrawal
     function createPlan(
         uint256 tenorSeconds,
         uint256 aprBps,
@@ -174,7 +176,6 @@ contract SavingCore is ERC721, Ownable, Pausable {
         emit PlanCreated(planId, tenorSeconds, aprBps);
     }
 
-    /// @notice Update the APR of an existing plan (does not affect open deposits)
     function updatePlan(uint256 planId, uint256 newAprBps) external onlyOwner {
         _requirePlanExists(planId);
         if (newAprBps == 0) revert InvalidApr();
@@ -182,22 +183,18 @@ contract SavingCore is ERC721, Ownable, Pausable {
         emit PlanUpdated(planId, newAprBps);
     }
 
-    /// @notice Enable a plan so users can open new deposits
     function enablePlan(uint256 planId) external onlyOwner {
         _requirePlanExists(planId);
         plans[planId].enabled = true;
         emit PlanEnabled(planId);
     }
 
-    /// @notice Disable a plan — existing deposits are unaffected
     function disablePlan(uint256 planId) external onlyOwner {
         _requirePlanExists(planId);
         plans[planId].enabled = false;
         emit PlanDisabled(planId);
     }
 
-    /// @notice Admin thay đổi grace period (min 1 giây, max 30 ngày)
-    /// @param newGracePeriod Thời gian tính bằng giây (ví dụ: 10000, 86400, 259200)
     function setGracePeriod(uint256 newGracePeriod) external onlyOwner {
         require(newGracePeriod > 0,        "Grace period phai lon hon 0");
         require(newGracePeriod <= 30 days, "Grace period qua dai");
@@ -205,41 +202,30 @@ contract SavingCore is ERC721, Ownable, Pausable {
         emit GracePeriodUpdated(newGracePeriod);
     }
 
-    /// @notice Admin force-close một deposit bất kỳ — chỉ trả gốc, không trả lãi
-    /// @dev Dùng để xử lý deposit lỗi (APR sai, vault không đủ, v.v.)
-    /// @param depositId Token ID của deposit cần đóng
+    /// @notice Admin force-close — chỉ trả gốc, không trả lãi.
+    ///         Tiền trả về `depositor`, không phụ thuộc NFT owner.
     function adminForceClose(uint256 depositId) external onlyOwner {
-        DepositCert storage cert = deposits[depositId];
-        require(cert.status == DepositStatus.Active, "Not active");
+        DepositCert storage d = deposits[depositId];
+        require(d.status == DepositStatus.Active, "Not active");
 
-        address owner     = ownerOf(depositId);
-        uint256 principal = cert.principal;
+        address depositor = d.depositor;
+        uint256 principal = d.principal;
 
-        uint256 interestWouldOwed = _calcInterest(
-            cert.principal,
-            cert.aprBpsAtOpen,
-            cert.tenorSeconds
-        );
+        uint256 interestWouldOwed = _calcInterest(d.principal, d.aprBpsAtOpen, d.tenorSeconds);
 
-        cert.status = DepositStatus.Withdrawn;
+        d.status = DepositStatus.Withdrawn;
         totalPrincipalLocked -= principal;
         if (totalInterestOwed >= interestWouldOwed)
             totalInterestOwed -= interestWouldOwed;
 
-        // Trả gốc về cho owner, không trả lãi
-        token.safeTransfer(owner, principal);
+        token.safeTransfer(depositor, principal);
 
-        emit AdminForceClosed(depositId, owner, principal);
-        emit Withdrawn(depositId, owner, principal, 0, false);
+        emit AdminForceClosed(depositId, depositor, principal);
+        emit Withdrawn(depositId, depositor, principal, 0, false);
     }
 
-    /// @notice Admin kiểm tra tính toàn vẹn — actual vs sổ sách
-    /// @dev Nếu actual < expected thì có thể đã bị hack
     function integrityCheck() external view returns (
-        bool isIntact,
-        uint256 actual,
-        uint256 expected,
-        uint256 diff
+        bool isIntact, uint256 actual, uint256 expected, uint256 diff
     ) {
         actual   = token.balanceOf(address(this));
         expected = totalPrincipalLocked;
@@ -247,18 +233,15 @@ contract SavingCore is ERC721, Ownable, Pausable {
         diff     = isIntact ? 0 : expected - actual;
     }
 
-    /// @notice Emergency pause — all user actions blocked
-    function pause() external onlyOwner { _pause(); }
-
-    /// @notice Resume normal operation
+    function pause()   external onlyOwner { _pause(); }
     function unpause() external onlyOwner { _unpause(); }
 
     // ─────────────────────── User flows ───────────────────────
 
-    /// @notice Open a new deposit
-    /// @param planId   ID of an enabled saving plan
-    /// @param amount   Token amount in smallest unit
-    /// @return depositId The minted NFT token ID
+    /// @notice Mở deposit mới.
+    ///         - `depositor` được ghi nhận vĩnh viễn = msg.sender
+    ///         - NFT được mint cho msg.sender (có thể transfer sau)
+    /// @return depositId ID của deposit (đồng thời là tokenId của NFT)
     function openDeposit(uint256 planId, uint256 amount)
         external
         whenNotPaused
@@ -271,10 +254,8 @@ contract SavingCore is ERC721, Ownable, Pausable {
         if (plan.maxDeposit > 0 && amount > plan.maxDeposit)
             revert AmountAboveMaximum(amount, plan.maxDeposit);
 
-        // Transfer principal from user to this contract
         token.safeTransferFrom(msg.sender, address(this), amount);
 
-        // Snapshot plan details and mint NFT
         depositId = nextDepositId++;
         uint256 maturityAt = block.timestamp + plan.tenorSeconds;
 
@@ -286,134 +267,132 @@ contract SavingCore is ERC721, Ownable, Pausable {
             tenorSeconds:     plan.tenorSeconds,
             startAt:          block.timestamp,
             maturityAt:       maturityAt,
-            status:           DepositStatus.Active
+            status:           DepositStatus.Active,
+            depositor:        msg.sender          // ← ghi nhận vĩnh viễn
         });
 
-        // Track totals for reconciliation
         uint256 interestOwed = _calcInterest(amount, plan.aprBps, plan.tenorSeconds);
         totalPrincipalLocked += amount;
         totalInterestOwed    += interestOwed;
 
-        _safeMint(msg.sender, depositId);
+        // Mint NFT (depositId == tokenId để dễ đối chiếu)
+        uint256 tokenId = cert.mint(msg.sender);
+        require(tokenId == depositId, "tokenId mismatch"); // sanity check
 
         emit DepositOpened(depositId, msg.sender, planId, amount, maturityAt, plan.aprBps);
     }
 
-    /// @notice Withdraw a matured deposit (principal + interest)
-    /// @param depositId The NFT token ID
+    /// @notice Rút sau khi đáo hạn — nhận gốc + lãi.
+    ///
+    ///         ┌────────────────────────────────────────────────┐
+    ///         │  Ai được gọi?  →  chỉ depositor               │
+    ///         │  Tiền về đâu?  →  depositor                   │
+    ///         │  NFT bị sao?   →  KHÔNG bị ảnh hưởng gì cả   │
+    ///         └────────────────────────────────────────────────┘
+    ///
+    /// @dev Người mất NFT vẫn gọi được hàm này vì chỉ check depositor.
     function withdrawAtMaturity(uint256 depositId) external whenNotPaused {
-        DepositCert storage cert = _requireActiveDeposit(depositId);
-        _requireOwner(depositId);
+        DepositCert storage d = _requireActiveDeposit(depositId);
+        _requireDepositor(depositId, d);
 
-        if (block.timestamp < cert.maturityAt)
-            revert DepositNotMatured(depositId, cert.maturityAt, block.timestamp);
+        if (block.timestamp < d.maturityAt)
+            revert DepositNotMatured(depositId, d.maturityAt, block.timestamp);
 
-        uint256 interest = _calcInterest(
-            cert.principal,
-            cert.aprBpsAtOpen,
-            cert.tenorSeconds
-        );
+        uint256 interest = _calcInterest(d.principal, d.aprBpsAtOpen, d.tenorSeconds);
 
-        cert.status = DepositStatus.Withdrawn;
-
-        // Update tracking
-        totalPrincipalLocked -= cert.principal;
+        d.status = DepositStatus.Withdrawn;
+        totalPrincipalLocked -= d.principal;
         totalInterestOwed    -= interest;
 
-        // Return principal — always safe (held in this contract)
-        token.safeTransfer(msg.sender, cert.principal);
+        address depositor = d.depositor;
 
-        // Pay interest from vault — if vault short, pay what's available
+        token.safeTransfer(depositor, d.principal);
+
         uint256 vaultAvail = vault.vaultBalance();
         if (vaultAvail >= interest) {
-            vault.payInterest(msg.sender, interest);
-            emit Withdrawn(depositId, msg.sender, cert.principal, interest, false);
+            vault.payInterest(depositor, interest);
+            emit Withdrawn(depositId, depositor, d.principal, interest, false);
         } else {
-            // Vault thiếu lãi: trả gốc đủ, trả lãi bao nhiêu có bấy nhiêu
-            if (vaultAvail > 0) vault.payInterest(msg.sender, vaultAvail);
-            emit InterestShortfall(depositId, msg.sender, cert.principal, interest, vaultAvail);
-            emit Withdrawn(depositId, msg.sender, cert.principal, vaultAvail, false);
+            if (vaultAvail > 0) vault.payInterest(depositor, vaultAvail);
+            emit InterestShortfall(depositId, depositor, d.principal, interest, vaultAvail);
+            emit Withdrawn(depositId, depositor, d.principal, vaultAvail, false);
         }
     }
 
-    /// @notice Withdraw before maturity — zero interest, penalty applied
-    /// @param depositId The NFT token ID
+    /// @notice Rút sớm trước đáo hạn — mất phạt, không có lãi.
+    ///
+    ///         ┌────────────────────────────────────────────────┐
+    ///         │  Ai được gọi?  →  chỉ depositor               │
+    ///         │  Tiền về đâu?  →  depositor                   │
+    ///         └────────────────────────────────────────────────┘
     function earlyWithdraw(uint256 depositId) external whenNotPaused {
-        DepositCert storage cert = _requireActiveDeposit(depositId);
-        _requireOwner(depositId);
+        DepositCert storage d = _requireActiveDeposit(depositId);
+        _requireDepositor(depositId, d);
 
-        // Must be before maturity to count as early
-        require(block.timestamp < cert.maturityAt, "Use withdrawAtMaturity");
+        require(block.timestamp < d.maturityAt, "Use withdrawAtMaturity");
 
-        uint256 penalty = (cert.principal * cert.penaltyBpsAtOpen) / BPS_DENOMINATOR;
-        uint256 userReceives = cert.principal - penalty;
+        uint256 penalty      = (d.principal * d.penaltyBpsAtOpen) / BPS_DENOMINATOR;
+        uint256 userReceives = d.principal - penalty;
 
-        cert.status = DepositStatus.Withdrawn;
+        d.status = DepositStatus.Withdrawn;
 
-        // Update tracking (early withdraw: no interest owed)
-        uint256 interestWouldOwed = _calcInterest(cert.principal, cert.aprBpsAtOpen, cert.tenorSeconds);
-        totalPrincipalLocked -= cert.principal;
+        uint256 interestWouldOwed = _calcInterest(d.principal, d.aprBpsAtOpen, d.tenorSeconds);
+        totalPrincipalLocked -= d.principal;
         if (totalInterestOwed >= interestWouldOwed)
             totalInterestOwed -= interestWouldOwed;
 
-        // Return principal minus penalty — luôn thành công vì contract đang giữ tiền
-        token.safeTransfer(msg.sender, userReceives);
+        address depositor = d.depositor;
 
-        // Penalty: gửi thẳng đến feeReceiver, không qua vault
-        // Tránh bị block nếu vault đang paused hoặc feeReceiver có vấn đề
+        token.safeTransfer(depositor, userReceives);
+
         if (penalty > 0) {
             address receiver = vault.feeReceiver();
             token.safeTransfer(receiver, penalty);
             emit PenaltyCollected(depositId, receiver, penalty);
         }
 
-        emit Withdrawn(depositId, msg.sender, cert.principal, 0, true);
+        emit Withdrawn(depositId, depositor, d.principal, 0, true);
     }
 
-    /// @notice Manually renew a matured deposit to a (possibly new) plan
-    /// @param depositId The NFT token ID of the matured deposit
-    /// @param newPlanId The plan to renew into
-    /// @return newDepositId The newly minted NFT token ID
+    /// @notice Gia hạn thủ công sau đáo hạn sang plan mới.
+    ///
+    ///         ┌─────────────────────────────────────────────────────────┐
+    ///         │  Ai được gọi?  →  depositor HOẶC NFT owner hiện tại    │
+    ///         │  Depositor của deposit mới? →  kế thừa từ deposit cũ   │
+    ///         │  NFT mới mint cho ai?       →  người gọi (msg.sender)  │
+    ///         └─────────────────────────────────────────────────────────┘
+    ///
+    /// @dev Cho phép NFT owner gia hạn giúp depositor (vd: smart contract DeFi).
+    ///      Depositor của deposit mới vẫn là depositor gốc — tiền không bị chiếm.
     function renewDeposit(uint256 depositId, uint256 newPlanId)
         external
         whenNotPaused
         returns (uint256 newDepositId)
     {
-        DepositCert storage cert = _requireActiveDeposit(depositId);
-        _requireOwner(depositId);
+        DepositCert storage d = _requireActiveDeposit(depositId);
+        _requireNftOwnerOrDepositor(depositId, d);
 
-        if (block.timestamp < cert.maturityAt)
-            revert DepositNotMatured(depositId, cert.maturityAt, block.timestamp);
+        if (block.timestamp < d.maturityAt)
+            revert DepositNotMatured(depositId, d.maturityAt, block.timestamp);
 
         SavingPlan storage newPlan = _requirePlanEnabled(newPlanId);
 
-        // Calculate interest earned on old deposit and compound into new principal
-        uint256 interest = _calcInterest(
-            cert.principal,
-            cert.aprBpsAtOpen,
-            cert.tenorSeconds
-        );
-        uint256 oldPrincipal = cert.principal;
+        uint256 interest    = _calcInterest(d.principal, d.aprBpsAtOpen, d.tenorSeconds);
+        uint256 oldPrincipal = d.principal;
         uint256 newPrincipal = oldPrincipal + interest;
+        address originalDepositor = d.depositor; // kế thừa depositor
 
-        // Pay interest from vault (covers the compounding)
         vault.payInterest(address(this), interest);
 
-        // ── FIX: cập nhật tracking trước khi đóng deposit cũ ──────────────
-        // Trừ principal + interestOwed của deposit cũ
         totalPrincipalLocked -= oldPrincipal;
-        uint256 oldInterestOwed = _calcInterest(oldPrincipal, cert.aprBpsAtOpen, cert.tenorSeconds);
+        uint256 oldInterestOwed = _calcInterest(oldPrincipal, d.aprBpsAtOpen, d.tenorSeconds);
         if (totalInterestOwed >= oldInterestOwed)
             totalInterestOwed -= oldInterestOwed;
 
-        // Mark old deposit as renewed
-        cert.status = DepositStatus.ManualRenewed;
+        d.status = DepositStatus.ManualRenewed;
 
-        // Mint new deposit NFT
         newDepositId = nextDepositId++;
-        uint256 newMaturityAt = block.timestamp + newPlan.tenorSeconds;
-
-        // ── FIX: cộng principal + interestOwed của deposit mới ─────────────
+        uint256 newMaturityAt  = block.timestamp + newPlan.tenorSeconds;
         uint256 newInterestOwed = _calcInterest(newPrincipal, newPlan.aprBps, newPlan.tenorSeconds);
         totalPrincipalLocked += newPrincipal;
         totalInterestOwed    += newInterestOwed;
@@ -426,95 +405,83 @@ contract SavingCore is ERC721, Ownable, Pausable {
             tenorSeconds:     newPlan.tenorSeconds,
             startAt:          block.timestamp,
             maturityAt:       newMaturityAt,
-            status:           DepositStatus.Active
+            status:           DepositStatus.Active,
+            depositor:        originalDepositor   // ← kế thừa, không đổi
         });
 
-        _safeMint(msg.sender, newDepositId);
+        // NFT mới mint cho msg.sender (NFT owner cũ hoặc depositor)
+        uint256 tokenId = cert.mint(msg.sender);
+        require(tokenId == newDepositId, "tokenId mismatch");
 
         emit Renewed(depositId, newDepositId, newPrincipal, newPlanId);
     }
 
-    /// @notice Trigger auto-renewal for a deposit whose grace period has expired.
-    ///         Called by an off-chain bot; anyone can call it.
-    /// @param depositId The NFT token ID
-    /// @return newDepositId The newly minted NFT token ID
+    /// @notice Auto-renew sau khi hết grace period — gọi bởi bot.
+    ///
+    ///         ┌─────────────────────────────────────────────────────────┐
+    ///         │  Ai được gọi?       →  bất kỳ (permissionless)         │
+    ///         │  Depositor kế thừa? →  có, từ deposit cũ              │
+    ///         │  NFT mới mint cho?  →  depositor (không phải bot)      │
+    ///         └─────────────────────────────────────────────────────────┘
     function autoRenewDeposit(uint256 depositId)
         external
         whenNotPaused
         returns (uint256 newDepositId)
     {
-        DepositCert storage cert = _requireActiveDeposit(depositId);
+        DepositCert storage d = _requireActiveDeposit(depositId);
 
-        uint256 gracePeriodEnd = cert.maturityAt + gracePeriod;
+        uint256 gracePeriodEnd = d.maturityAt + gracePeriod;
         if (block.timestamp < gracePeriodEnd)
             revert GracePeriodNotExpired(depositId, gracePeriodEnd, block.timestamp);
 
-        address owner = ownerOf(depositId);
+        address originalDepositor = d.depositor;
 
-        uint256 interest = _calcInterest(
-            cert.principal,
-            cert.aprBpsAtOpen,
-            cert.tenorSeconds
-        );
-        uint256 oldPrincipal = cert.principal;
+        uint256 interest     = _calcInterest(d.principal, d.aprBpsAtOpen, d.tenorSeconds);
+        uint256 oldPrincipal = d.principal;
         uint256 newPrincipal = oldPrincipal + interest;
 
         vault.payInterest(address(this), interest);
 
-        // ── FIX: Trừ tracking của deposit cũ ──────────────────────────────────
         totalPrincipalLocked -= oldPrincipal;
-        uint256 oldInterestOwed = _calcInterest(
-            oldPrincipal,
-            cert.aprBpsAtOpen,
-            cert.tenorSeconds
-        );
+        uint256 oldInterestOwed = _calcInterest(oldPrincipal, d.aprBpsAtOpen, d.tenorSeconds);
         if (totalInterestOwed >= oldInterestOwed)
             totalInterestOwed -= oldInterestOwed;
 
-        cert.status = DepositStatus.AutoRenewed;
+        d.status = DepositStatus.AutoRenewed;
 
         newDepositId = nextDepositId++;
-        uint256 newMaturityAt = block.timestamp + cert.tenorSeconds;
-
-        // ── FIX: Cộng tracking của deposit mới ────────────────────────────────
-        uint256 newInterestOwed = _calcInterest(
-            newPrincipal,
-            cert.aprBpsAtOpen,   // locked to original APR
-            cert.tenorSeconds
-        );
+        uint256 newMaturityAt  = block.timestamp + d.tenorSeconds;
+        uint256 newInterestOwed = _calcInterest(newPrincipal, d.aprBpsAtOpen, d.tenorSeconds);
         totalPrincipalLocked += newPrincipal;
         totalInterestOwed    += newInterestOwed;
 
         deposits[newDepositId] = DepositCert({
-            planId:           cert.planId,
+            planId:           d.planId,
             principal:        newPrincipal,
-            aprBpsAtOpen:     cert.aprBpsAtOpen,
-            penaltyBpsAtOpen: cert.penaltyBpsAtOpen,
-            tenorSeconds:     cert.tenorSeconds,
+            aprBpsAtOpen:     d.aprBpsAtOpen,
+            penaltyBpsAtOpen: d.penaltyBpsAtOpen,
+            tenorSeconds:     d.tenorSeconds,
             startAt:          block.timestamp,
             maturityAt:       newMaturityAt,
-            status:           DepositStatus.Active
+            status:           DepositStatus.Active,
+            depositor:        originalDepositor   // ← bot không thể chiếm tiền
         });
 
-        _safeMint(owner, newDepositId);
+        // NFT mint về depositor, không phải bot
+        uint256 tokenId = cert.mint(originalDepositor);
+        require(tokenId == newDepositId, "tokenId mismatch");
 
-        emit Renewed(depositId, newDepositId, newPrincipal, cert.planId);
+        emit Renewed(depositId, newDepositId, newPrincipal, d.planId);
     }
 
     // ─────────────────────── Views ───────────────────────
 
-    /// @notice Kiểm tra vault có đủ để trả lãi cho tất cả deposit không
-    /// @return sufficient  true nếu đủ
-    /// @return shortfall   số tiền thiếu (0 nếu đủ)
     function vaultSolvencyCheck() external view returns (bool sufficient, uint256 shortfall) {
         uint256 vaultBal = vault.vaultBalance();
-        if (vaultBal >= totalInterestOwed) {
-            return (true, 0);
-        }
+        if (vaultBal >= totalInterestOwed) return (true, 0);
         return (false, totalInterestOwed - vaultBal);
     }
 
-    /// @notice Tổng quan tài chính để Admin đối soát
     function financialSummary() external view returns (
         uint256 principalLocked,
         uint256 interestOwed,
@@ -529,29 +496,32 @@ contract SavingCore is ERC721, Ownable, Pausable {
         shortfall       = isSolvent ? 0 : interestOwed - vaultBalance;
     }
 
-    /// @notice Calculate the simple interest for a deposit
-    /// @param principal    Deposit amount (smallest unit)
-    /// @param aprBps       Annual rate in basis points
-    /// @param tenorSeconds Duration in seconds
     function calcInterest(uint256 principal, uint256 aprBps, uint256 tenorSeconds)
         external pure returns (uint256)
     {
         return _calcInterest(principal, aprBps, tenorSeconds);
     }
 
-    /// @notice Get full details of a deposit certificate
     function getDeposit(uint256 depositId) external view returns (DepositCert memory) {
         return deposits[depositId];
     }
 
-    /// @notice Get full details of a saving plan
     function getPlan(uint256 planId) external view returns (SavingPlan memory) {
         return plans[planId];
     }
 
+    /// @notice Tiện ích: lấy NFT owner hiện tại của một deposit
+    function getNftOwner(uint256 depositId) external view returns (address) {
+        return cert.ownerOf(depositId);
+    }
+
+    /// @notice Tiện ích: lấy depositor của một deposit
+    function getDepositor(uint256 depositId) external view returns (address) {
+        return deposits[depositId].depositor;
+    }
+
     // ─────────────────────── Internal helpers ───────────────────────
 
-    /// @dev Simple interest: (principal * aprBps * tenorSeconds) / (SECONDS_PER_YEAR * BPS_DENOMINATOR)
     function _calcInterest(
         uint256 principal,
         uint256 aprBps,
@@ -570,12 +540,26 @@ contract SavingCore is ERC721, Ownable, Pausable {
         if (!plan.enabled) revert PlanIsDisabled(planId);
     }
 
-    function _requireActiveDeposit(uint256 depositId) internal view returns (DepositCert storage cert) {
-        cert = deposits[depositId];
-        if (cert.status != DepositStatus.Active) revert DepositNotActive(depositId);
+    function _requireActiveDeposit(uint256 depositId) internal view returns (DepositCert storage d) {
+        d = deposits[depositId];
+        if (d.status != DepositStatus.Active) revert DepositNotActive(depositId);
     }
 
-    function _requireOwner(uint256 depositId) internal view {
-        if (ownerOf(depositId) != msg.sender) revert NotDepositOwner(depositId, msg.sender);
+    /// @dev Chỉ depositor mới được rút tiền
+    function _requireDepositor(uint256 depositId, DepositCert storage d) internal view {
+        if (d.depositor != msg.sender) revert NotDepositor(depositId, msg.sender);
+    }
+
+    /// @dev NFT owner HOẶC depositor đều được gia hạn
+    function _requireNftOwnerOrDepositor(uint256 depositId, DepositCert storage d) internal view {
+        bool isDepositor = (d.depositor == msg.sender);
+        bool isNftOwner  = false;
+        try cert.ownerOf(depositId) returns (address nftOwner) {
+            isNftOwner = (nftOwner == msg.sender);
+        } catch {}
+        if (!isDepositor && !isNftOwner)
+            revert NotNftOwnerOrDepositor(depositId, msg.sender);
     }
 }
+
+
